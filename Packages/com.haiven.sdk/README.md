@@ -14,9 +14,9 @@ Add it by git URL in the Package Manager, or in `Packages/manifest.json`:
 }
 ```
 
-The minimum supported editor is Unity `2022.3`. Release evidence is pinned to
-Unity `2022.3.62f2` with its matching WebGL module. Older editors may accept the
-package's `netstandard2.1` surface, but they are outside the supported range.
+The minimum supported editor is Unity `6000.0` (Unity 6.0 LTS). This Boss Room
+demo pins editor `6000.0.52f1` (`9e4086222921`). The package still targets
+`netstandard2.1`.
 
 The package is self-contained: `Runtime/Core` carries the current portable C#
 core as generated source, including `BuiltInJsonCodec`. No managed DLL or NuGet
@@ -187,10 +187,11 @@ Unity 2022.3.62f2 in a recorded engine run,
 but that run predates the shared client-corpus test. Three release claims remain
 narrower than the current source evidence:
 
-1. **The exact supported editor.** Release evidence for this aggregate must
-   come from a successful same-repository pull-request run on the pinned Unity
-   2022.3.62f2 runner; run 38601804971 proves only the older subset at its own
-   tip. The repository ruleset does not currently require this workflow.
+1. **The exact supported editor.** The declared floor is Unity 6.0, and this
+   demo pins `6000.0.52f1`. Run 38601804971 exercised an older package subset
+   on Unity 2022.3.62f2 and is not evidence for this pin. No Unity 6.0 editor
+   run is recorded for this tree. The repository ruleset does not currently
+   require this workflow.
 2. **`link.xml`.** Removal experiment done (a recorded engine run):
    the stripped WebGL smoke passes without it. The smoke did not exercise typed
    payload decoding; see the scope recorded in `Runtime/link.xml`.
