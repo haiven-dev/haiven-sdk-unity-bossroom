@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "displayName": "Haiven Boss Room Demo",
   "description": "Demo integration of the Haiven SDK into Unity's Boss Room sample: moderated chat, a live reward claim, and inventory fed by Haiven item entitlements.",
-  "unity": "2022.3",
+  "unity": "6000.0",
   "author": {
     "name": "Haiven"
   },
