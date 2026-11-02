@@ -1,0 +1,19 @@
+{
+  "name": "Haiven.Demo.BossRoom",
+  "rootNamespace": "Haiven.Demo.BossRoom",
+  "references": [
+    "Haiven.Sdk",
+    "Haiven.Sdk.Core",
+    "UnityEngine.UI"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "WebGL"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

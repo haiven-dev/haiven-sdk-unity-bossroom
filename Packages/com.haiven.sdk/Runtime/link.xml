@@ -1,0 +1,31 @@
+<!--
+  Preserves the Haiven.Sdk assembly (this package's Runtime asmdef: WebGlSocket,
+  UnityHandoff) from IL2CPP managed stripping.
+
+  REMOVAL EXPERIMENT, 2026-10-11: unity-editor.yml run 38113269264 on a probe
+  branch (main d185fd9 with only this file deleted) passed every step on Unity
+  2022.3.62f2 with High managed stripping: EditMode, PlayMode, the WebGL build,
+  and the Chromium smoke (HAIVEN_WEBGL_PASS, a Unicode socket round trip,
+  protocol parsing, disposal, and the handoff exchange). So the smoke does not
+  need this file. What that does and does not establish:
+
+    - The JavaScript callbacks are NOT stripped without it. They carry
+      [MonoPInvokeCallback], which IL2CPP keeps; inbound frames arrived in the
+      stripped player. That half of the original rationale was wrong.
+
+    - Typed JSON decoding was NOT covered by the experiment. The built-in codec
+      now calls generated readers and writers directly, and `make check-aot`
+      proves the portable core has zero IL2xxx/IL3xxx warnings without a
+      baseline allowance. The opt-in System.Text.Json adapter is outside that
+      default AOT claim.
+
+  Haiven.Sdk.Core is deliberately not preserved. BuiltInJsonCodec and the
+  generated wire readers use direct calls rather than reflection, so ordinary
+  managed reachability is both sufficient and a more truthful stripping rule.
+
+  Kept because it costs nothing and validate-package.mjs expects exactly one,
+  not because a build was observed to need it.
+-->
+<linker>
+  <assembly fullname="Haiven.Sdk" preserve="all" />
+</linker>

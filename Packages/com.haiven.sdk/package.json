@@ -1,0 +1,20 @@
+{
+  "name": "com.haiven.sdk",
+  "version": "0.0.0",
+  "displayName": "Haiven SDK",
+  "description": "Client SDK for Haiven WebSocket and game login handoff APIs in Unity, including WebGL.",
+  "unity": "2022.3",
+  "documentationUrl": "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/com.haiven.sdk/README.md",
+  "keywords": [
+    "haiven",
+    "sdk",
+    "websocket",
+    "authentication"
+  ],
+  "author": {
+    "name": "Haiven"
+  },
+  "dependencies": {
+    "com.unity.modules.unitywebrequest": "1.0.0"
+  }
+}

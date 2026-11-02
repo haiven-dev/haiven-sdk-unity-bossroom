@@ -1,0 +1,20 @@
+{
+  "name": "Haiven.Sdk.SystemTextJson.Unity",
+  "rootNamespace": "Haiven.Sdk.Json.SystemTextJson",
+  "references": [
+    "Haiven.Sdk.Core"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "System.Text.Json.dll"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [
+    "HAIVEN_SDK_SYSTEM_TEXT_JSON"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
