@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "baseUrl": "http://127.0.0.1:18480/v0",
+  "realtimeUrl": "ws://127.0.0.1:18480/v0/ws",
+  "appId": "b055b055-0000-4000-8000-000000000001",
+  "integrationId": "haiven-sdk-demo",
+  "communityId": "01a1579d-0978-76bb-a29f-a54dda0e0519",
+  "channelId": "01a1579d-0979-79af-b434-b9d15afa6afb",
+  "rewardRef": "bossroom/friday-drop",
+  "signInUrl": "http://127.0.0.1:3000/connect/game",
+  "redirectUri": "http://127.0.0.1:47615/haiven/callback"
+}

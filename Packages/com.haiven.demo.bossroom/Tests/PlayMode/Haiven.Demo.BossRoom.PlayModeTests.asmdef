@@ -1,0 +1,27 @@
+{
+  "name": "Haiven.Demo.BossRoom.PlayModeTests",
+  "rootNamespace": "Haiven.Demo.BossRoom.PlayModeTests",
+  "references": [
+    "Haiven.Demo.BossRoom",
+    "Haiven.Sdk",
+    "Haiven.Sdk.Core",
+    "UnityEngine.UI",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "WebGL"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
