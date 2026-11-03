@@ -1,0 +1,28 @@
+{
+  "name": "Haiven.Demo.BossRoom.P2P.Tests",
+  "rootNamespace": "Haiven.Demo.BossRoom.P2P.Tests",
+  "references": [
+    "Haiven.Demo.BossRoom.P2P",
+    "Unity.WebRTC",
+    "Unity.Netcode.Runtime",
+    "Unity.Collections",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner",
+    "Unity.Networking.Transport"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "WebGL"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

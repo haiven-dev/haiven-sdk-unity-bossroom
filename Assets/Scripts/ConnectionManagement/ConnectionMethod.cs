@@ -98,7 +98,7 @@ namespace Unity.BossRoom.ConnectionManagement
         public override void SetupClientConnection()
         {
             SetConnectionPayload(GetPlayerId(), m_PlayerName);
-            var utp = (UnityTransport)m_ConnectionManager.NetworkManager.NetworkConfig.NetworkTransport;
+            var utp = m_ConnectionManager.NetworkManager.GetComponent<UnityTransport>();
             utp.SetConnectionData(m_Ipaddress, m_Port);
         }
 
@@ -111,7 +111,7 @@ namespace Unity.BossRoom.ConnectionManagement
         public override void SetupHostConnection()
         {
             SetConnectionPayload(GetPlayerId(), m_PlayerName); // Need to set connection payload for host as well, as host is a client too
-            var utp = (UnityTransport)m_ConnectionManager.NetworkManager.NetworkConfig.NetworkTransport;
+            var utp = m_ConnectionManager.NetworkManager.GetComponent<UnityTransport>();
             utp.SetConnectionData(m_Ipaddress, m_Port);
         }
     }
