@@ -17,10 +17,12 @@ namespace Haiven.Demo.BossRoom.P2P
     ///
     /// Switched on by any of: the <c>-haiven-p2p</c> command-line argument,
     /// <c>HAIVEN_P2P=1</c>, or the editor menu Haiven > P2P Transport.
-    /// <c>HAIVEN_P2P_TURN_URL</c> and <c>HAIVEN_P2P_TURN_SECRET</c> make every
-    /// session <c>relay-only</c> through that TURN server, the way a session with
-    /// a child runs. The credential is minted here only because this is a local
-    /// test bed; in a Haiven session haiven-api issues it.
+    /// <c>HAIVEN_P2P_TURN_URL</c> (one URL, or several separated by commas)
+    /// makes every session <c>relay-only</c> through that TURN server, the way a
+    /// session with a child runs. The credential is either issued elsewhere and
+    /// given as <c>HAIVEN_P2P_TURN_USERNAME</c> and <c>HAIVEN_P2P_TURN_CREDENTIAL</c>,
+    /// or minted here per connection from <c>HAIVEN_P2P_TURN_SECRET</c>, which only
+    /// a local test relay should use; in a Haiven session haiven-api issues it.
     /// The Multiplayer Services session flow keeps Unity Transport and does not
     /// work while P2P is on.
     /// </summary>
@@ -81,10 +83,29 @@ namespace Haiven.Demo.BossRoom.P2P
 
         private static PeerConnectionOptions ConnectionFromEnvironment()
         {
-            var url = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_URL");
-            var secret = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_SECRET");
-            if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(secret))
-                return new PeerConnectionOptions(Array.Empty<PeerIceServer>(), PeerIcePolicy.All);
+            var direct = new PeerConnectionOptions(Array.Empty<PeerIceServer>(), PeerIcePolicy.All);
+            var urls = (Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_URL") ?? "")
+                .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(url => url.Trim())
+                .Where(url => url.Length > 0)
+                .ToArray();
+            if (urls.Length == 0) return direct;
+
+            // A credential issued elsewhere, the way haiven-api returns one in
+            // p2p.ice.servers; coturn allows several allocations per username.
+            // Values are trimmed: a CR from a Windows shell breaks the HMAC.
+            var issuedUser = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_USERNAME")?.Trim();
+            var issuedPassword = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_CREDENTIAL")?.Trim();
+            if (!string.IsNullOrEmpty(issuedUser) && !string.IsNullOrEmpty(issuedPassword))
+                return new PeerConnectionOptions(
+                    new[] { new PeerIceServer(urls, issuedUser, issuedPassword) }, PeerIcePolicy.Relay);
+
+            var secret = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_SECRET")?.Trim();
+            if (string.IsNullOrEmpty(secret))
+            {
+                Debug.LogWarning("[haiven-p2p] HAIVEN_P2P_TURN_URL is set without a credential or secret; playing direct");
+                return direct;
+            }
 
             // The TURN REST scheme haiven-api issues: username "<expiry>:<id>",
             // password base64(HMAC-SHA1(secret, username)).
@@ -92,7 +113,7 @@ namespace Haiven.Demo.BossRoom.P2P
             using var hmac = new HMACSHA1(Encoding.UTF8.GetBytes(secret));
             var password = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(username)));
             return new PeerConnectionOptions(
-                new[] { new PeerIceServer(new[] { url! }, username, password) }, PeerIcePolicy.Relay);
+                new[] { new PeerIceServer(urls, username, password) }, PeerIcePolicy.Relay);
         }
     }
 }
