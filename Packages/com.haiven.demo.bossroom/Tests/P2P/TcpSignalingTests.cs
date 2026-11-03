@@ -53,14 +53,57 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             var guestTransport = (HaivenNetworkTransport)guest.NetworkConfig.NetworkTransport;
             Assert.That(((TcpPeerSignaling)guestTransport.Signaling!).LocalUserId, Is.EqualTo("guest-1"));
 
+            var left = Time.realtimeSinceStartup;
             guest.Shutdown();
             yield return Until(() => host.ConnectedClientsIds.Count == 1);
+            Debug.Log($"[haiven-p2p] host saw the guest leave after {Time.realtimeSinceStartup - left:F2} s");
 
             // Off and on again: a second guest joins the same host.
             var second = Manager("second guest", port);
             Assert.That(second.StartClient(), Is.True);
             yield return Until(() => second.IsConnectedClient && host.ConnectedClientsIds.Count == 2);
             Assert.That(hostTransport.GetUserId(2), Is.EqualTo("guest-2"));
+        }
+
+        [UnityTest]
+        public IEnumerator BossRoomSessionRunsRelayOnlyThroughTurn()
+        {
+            // HaivenP2PBoot reads the same variables a player sets for the game.
+            if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_URL")))
+                Assert.Ignore("HAIVEN_P2P_TURN_URL and HAIVEN_P2P_TURN_SECRET are not set");
+
+            var port = FreePort();
+            var host = Manager("host", port);
+            var guest = Manager("guest", port);
+            var hostTransport = (HaivenNetworkTransport)host.NetworkConfig.NetworkTransport;
+            var guestTransport = (HaivenNetworkTransport)guest.NetworkConfig.NetworkTransport;
+            Assert.That(hostTransport.Connection.Policy, Is.EqualTo(PeerIcePolicy.Relay));
+
+            Assert.That(host.StartHost(), Is.True);
+            Assert.That(guest.StartClient(), Is.True);
+            yield return Until(() => guest.IsConnectedClient && host.ConnectedClientsIds.Count == 2);
+            yield return Until(() => hostTransport.GetPathType(1) != null
+                && guestTransport.GetPathType(guestTransport.ServerClientId) != null);
+
+            Assert.That(hostTransport.GetPathType(1), Is.EqualTo("relay"));
+            Assert.That(guestTransport.GetPathType(guestTransport.ServerClientId), Is.EqualTo("relay"));
+            hostTransport.TryGetRoundTripTime(1, out var rtt);
+            Debug.Log($"[haiven-p2p] relay round trip {rtt} ms through {Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_URL")}");
+        }
+
+        [UnityTest]
+        public IEnumerator BossRoomSessionRunsDirectWithoutTurn()
+        {
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_URL")))
+                Assert.Ignore("TURN is set, so the session is relay-only");
+            var port = FreePort();
+            var host = Manager("host", port);
+            var guest = Manager("guest", port);
+            var hostTransport = (HaivenNetworkTransport)host.NetworkConfig.NetworkTransport;
+            Assert.That(host.StartHost(), Is.True);
+            Assert.That(guest.StartClient(), Is.True);
+            yield return Until(() => hostTransport.GetPathType(1) != null);
+            Assert.That(hostTransport.GetPathType(1), Is.EqualTo("host"));
         }
 
         [UnityTest]

@@ -39,8 +39,15 @@ namespace Haiven.Demo.BossRoom.P2P
             connection = new RTCPeerConnection(ref configuration);
             connection.OnIceCandidate = candidate => LocalCandidate?.Invoke(
                 new PeerIceCandidate(candidate.Candidate, candidate.SdpMid, candidate.SdpMLineIndex));
-            connection.OnConnectionStateChange = state =>
+            // com.unity.webrtc looks a callback's target up by its native pointer
+            // when the main thread runs it, after the event. A connection or
+            // channel disposed in between can leave its pointer to a new one, so
+            // its late close reaches the new object. Each handler therefore acts
+            // on the object's own state, not on the callback alone.
+            connection.OnConnectionStateChange = _ =>
             {
+                if (closed) return;
+                var state = connection.ConnectionState;
                 if (state == RTCPeerConnectionState.Failed) Close("connection failed");
                 else if (state == RTCPeerConnectionState.Closed) Close("connection closed");
             };
@@ -119,6 +126,8 @@ namespace Haiven.Demo.BossRoom.P2P
 
         public long RoundTripTimeMs { get; private set; } = -1;
 
+        public string? PathType { get; private set; }
+
         public async void RefreshRoundTripTime()
         {
             if (closed || measuring) return;
@@ -129,8 +138,12 @@ namespace Haiven.Demo.BossRoom.P2P
                 await Wait(request);
                 if (closed || request.IsError || request.Value == null) return;
                 using var report = request.Value;
-                var seconds = SelectedPairRoundTrip(report);
-                if (seconds != null) RoundTripTimeMs = (long)Math.Ceiling(seconds.Value * 1000);
+                var pair = SelectedPair(report);
+                if (pair == null) return;
+                if (pair.Dict.ContainsKey("currentRoundTripTime"))
+                    RoundTripTimeMs = (long)Math.Ceiling(pair.currentRoundTripTime * 1000);
+                if (report.Stats.TryGetValue(pair.localCandidateId, out var local) && local is RTCIceCandidateStats candidate)
+                    PathType = candidate.candidateType;
             }
             finally
             {
@@ -140,17 +153,15 @@ namespace Haiven.Demo.BossRoom.P2P
 
         // The transport stats name the candidate pair in use; its
         // currentRoundTripTime comes from STUN consent checks, about one a second.
-        private static double? SelectedPairRoundTrip(RTCStatsReport report)
+        private static RTCIceCandidatePairStats? SelectedPair(RTCStatsReport report)
         {
             var selected = report.Stats.Values.OfType<RTCTransportStats>()
                 .Select(stats => stats.selectedCandidatePairId)
                 .FirstOrDefault(id => !string.IsNullOrEmpty(id));
-            var pair = selected != null && report.Stats.TryGetValue(selected, out var named)
+            return selected != null && report.Stats.TryGetValue(selected, out var named)
                 ? named as RTCIceCandidatePairStats
                 : report.Stats.Values.OfType<RTCIceCandidatePairStats>()
                     .FirstOrDefault(candidate => candidate.nominated && candidate.state == "succeeded");
-            if (pair == null || !pair.Dict.ContainsKey("currentRoundTripTime")) return null;
-            return pair.currentRoundTripTime;
         }
 
         public void Dispose() => Close("disposed");
@@ -158,9 +169,19 @@ namespace Haiven.Demo.BossRoom.P2P
         private RTCDataChannel Open(PeerChannel channel, string label, RTCDataChannelInit init)
         {
             var created = connection.CreateDataChannel(label, init);
-            created.OnOpen = () => ChannelOpened?.Invoke(channel);
-            created.OnMessage = bytes => Received?.Invoke(channel, bytes);
-            created.OnClose = () => Close(label + " closed");
+            created.OnOpen = () =>
+            {
+                if (!closed && created.ReadyState == RTCDataChannelState.Open) ChannelOpened?.Invoke(channel);
+            };
+            created.OnMessage = bytes =>
+            {
+                if (!closed) Received?.Invoke(channel, bytes);
+            };
+            created.OnClose = () =>
+            {
+                var state = created.ReadyState;
+                if (state == RTCDataChannelState.Closed || state == RTCDataChannelState.Closing) Close(label + " closed");
+            };
             return created;
         }
 

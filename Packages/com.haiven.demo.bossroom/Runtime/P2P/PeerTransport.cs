@@ -105,7 +105,13 @@ namespace Haiven.Demo.BossRoom.P2P
         /// <summary>The last measured round-trip time on the selected path, in milliseconds; -1 before the first measurement.</summary>
         long RoundTripTimeMs { get; }
 
-        /// <summary>Starts a new measurement of <see cref="RoundTripTimeMs"/> unless one is running.</summary>
+        /// <summary>
+        /// The ICE type of the local candidate on the selected path: <c>host</c>,
+        /// <c>srflx</c>, <c>prflx</c> or <c>relay</c>. Null before the first measurement.
+        /// </summary>
+        string? PathType { get; }
+
+        /// <summary>Starts a new measurement of <see cref="RoundTripTimeMs"/> and <see cref="PathType"/> unless one is running.</summary>
         void RefreshRoundTripTime();
 
         /// <summary>Raised for each local candidate, to be sent through signaling.</summary>

@@ -114,7 +114,16 @@ namespace Haiven.Demo.BossRoom.P2P
             {
                 nextRoundTrip = Time.realtimeSinceStartup + RoundTripInterval;
                 foreach (var peer in peersByClient.Values)
-                    if (peer.Connected) peer.Link.Transport.RefreshRoundTripTime();
+                {
+                    if (!peer.Connected) continue;
+                    var path = peer.Link.Transport.PathType;
+                    if (path != null && path != peer.LoggedPath)
+                    {
+                        peer.LoggedPath = path;
+                        Debug.Log($"[haiven-p2p] connected to {peer.UserId} over a {path} path");
+                    }
+                    peer.Link.Transport.RefreshRoundTripTime();
+                }
             }
             if (events.Count == 0)
             {
@@ -133,12 +142,12 @@ namespace Haiven.Demo.BossRoom.P2P
 
         public override void DisconnectRemoteClient(ulong clientId)
         {
-            if (peersByClient.TryGetValue(clientId, out var peer)) Lose(peer, raiseEvent: false);
+            if (peersByClient.TryGetValue(clientId, out var peer)) Lose(peer, raiseEvent: false, sayGoodbye: true);
         }
 
         public override void DisconnectLocalClient()
         {
-            if (peersByClient.TryGetValue(HostClientId, out var peer)) Lose(peer, raiseEvent: false);
+            if (peersByClient.TryGetValue(HostClientId, out var peer)) Lose(peer, raiseEvent: false, sayGoodbye: true);
         }
 
         /// <summary>The round-trip time to a peer, from the WebRTC stats read once a second.</summary>
@@ -147,6 +156,10 @@ namespace Haiven.Demo.BossRoom.P2P
             milliseconds = peersByClient.TryGetValue(clientId, out var peer) ? peer.Link.Transport.RoundTripTimeMs : -1;
             return milliseconds >= 0;
         }
+
+        /// <summary>The ICE type of the local candidate on the path to a peer, once measured.</summary>
+        public string? GetPathType(ulong clientId) =>
+            peersByClient.TryGetValue(clientId, out var peer) ? peer.Link.Transport.PathType : null;
 
         public override ulong GetCurrentRtt(ulong clientId) =>
             TryGetRoundTripTime(clientId, out var milliseconds) ? (ulong)milliseconds : 0;
@@ -159,7 +172,7 @@ namespace Haiven.Demo.BossRoom.P2P
                 lifecycle.HostUnreachable -= OnHostUnreachable;
                 lifecycle.Stop();
             }
-            foreach (var peer in new List<Peer>(peersByClient.Values)) Lose(peer, raiseEvent: false);
+            foreach (var peer in new List<Peer>(peersByClient.Values)) Lose(peer, raiseEvent: false, sayGoodbye: true);
             events.Clear();
             nextClientId = 1;
             started = false;
@@ -335,6 +348,12 @@ namespace Haiven.Demo.BossRoom.P2P
             }
 
             if (message.Length < 1) return;
+            if (message[0] == PeerFraming.Goodbye)
+            {
+                Debug.Log($"[haiven-p2p] {peer.UserId} closed the connection");
+                Lose(peer, raiseEvent: true);
+                return;
+            }
             if (message[0] == PeerFraming.Unreliable)
             {
                 Enqueue(NetworkEvent.Data, peer.ClientId, new ArraySegment<byte>(message, 1, message.Length - 1));
@@ -359,14 +378,30 @@ namespace Haiven.Demo.BossRoom.P2P
 
         // A guest that loses the host always hears about it, so NGO stops
         // waiting; the host hears only about guests that had connected.
-        private void Lose(Peer peer, bool raiseEvent)
+        private void Lose(Peer peer, bool raiseEvent, bool sayGoodbye = false)
         {
             if (peer.Lost) return;
             peer.Lost = true;
             peersByClient.Remove(peer.ClientId);
             if (peersByUser.TryGetValue(peer.UserId, out var current) && current == peer) peersByUser.Remove(peer.UserId);
-            peer.Link.Dispose();
+            if (sayGoodbye && peer.Connected)
+            {
+                // Three copies, since the channel may drop one, and a short
+                // wait so they leave before the connection and its allocation go.
+                for (var i = 0; i < 3; i++) peer.Link.Send(new[] { PeerFraming.Goodbye }, reliable: false);
+                _ = DisposeAfterGoodbye(peer.Link);
+            }
+            else
+            {
+                peer.Link.Dispose();
+            }
             if (raiseEvent && (peer.Connected || !isServer)) Enqueue(NetworkEvent.Disconnect, peer.ClientId, default);
+        }
+
+        private static async Task DisposeAfterGoodbye(HaivenPeerLink link)
+        {
+            await Task.Delay(200);
+            link.Dispose();
         }
 
         private void Enqueue(NetworkEvent type, ulong clientId, ArraySegment<byte> payload) =>
@@ -415,6 +450,8 @@ namespace Haiven.Demo.BossRoom.P2P
             public bool RemoteApplied { get; set; }
 
             public bool LocalSent { get; set; }
+
+            public string? LoggedPath { get; set; }
 
             public bool Connected { get; set; }
 
