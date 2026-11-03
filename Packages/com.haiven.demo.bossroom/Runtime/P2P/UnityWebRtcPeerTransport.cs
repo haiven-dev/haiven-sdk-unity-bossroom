@@ -19,6 +19,7 @@ namespace Haiven.Demo.BossRoom.P2P
         private readonly RTCDataChannel reliable;
         private readonly RTCDataChannel unreliable;
         private bool closed;
+        private bool measuring;
 
         public UnityWebRtcPeerTransport(PeerConnectionOptions options)
         {
@@ -115,6 +116,42 @@ namespace Haiven.Demo.BossRoom.P2P
 
         public long BufferedAmount(PeerChannel channel) =>
             closed ? 0 : (long)(channel == PeerChannel.Reliable ? reliable : unreliable).BufferedAmount;
+
+        public long RoundTripTimeMs { get; private set; } = -1;
+
+        public async void RefreshRoundTripTime()
+        {
+            if (closed || measuring) return;
+            measuring = true;
+            try
+            {
+                var request = connection.GetStats();
+                await Wait(request);
+                if (closed || request.IsError || request.Value == null) return;
+                using var report = request.Value;
+                var seconds = SelectedPairRoundTrip(report);
+                if (seconds != null) RoundTripTimeMs = (long)Math.Ceiling(seconds.Value * 1000);
+            }
+            finally
+            {
+                measuring = false;
+            }
+        }
+
+        // The transport stats name the candidate pair in use; its
+        // currentRoundTripTime comes from STUN consent checks, about one a second.
+        private static double? SelectedPairRoundTrip(RTCStatsReport report)
+        {
+            var selected = report.Stats.Values.OfType<RTCTransportStats>()
+                .Select(stats => stats.selectedCandidatePairId)
+                .FirstOrDefault(id => !string.IsNullOrEmpty(id));
+            var pair = selected != null && report.Stats.TryGetValue(selected, out var named)
+                ? named as RTCIceCandidatePairStats
+                : report.Stats.Values.OfType<RTCIceCandidatePairStats>()
+                    .FirstOrDefault(candidate => candidate.nominated && candidate.state == "succeeded");
+            if (pair == null || !pair.Dict.ContainsKey("currentRoundTripTime")) return null;
+            return pair.currentRoundTripTime;
+        }
 
         public void Dispose() => Close("disposed");
 

@@ -234,6 +234,16 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             yield return Until(() => received != null);
             Assert.That(received, Is.EqualTo(big));
 
+            // Boss Room's network stats read this every frame.
+            var guestTransport = (HaivenNetworkTransport)guestManager.NetworkConfig.NetworkTransport;
+            long guestRtt = -1, hostRtt = -1;
+            yield return Until(() => guestTransport.TryGetRoundTripTime(guestTransport.ServerClientId, out guestRtt)
+                && hostTransport.TryGetRoundTripTime(1, out hostRtt));
+            Assert.That(guestRtt, Is.InRange(0, 1000));
+            Assert.That(hostRtt, Is.InRange(0, 1000));
+            Assert.That(guestTransport.GetCurrentRtt(guestTransport.ServerClientId), Is.EqualTo((ulong)guestRtt));
+            Debug.Log($"[haiven-p2p] loopback round trip: guest {guestRtt} ms, host {hostRtt} ms");
+
             guestManager.Shutdown();
             yield return Until(() => hostManager.ConnectedClientsIds.Count == 1);
         }

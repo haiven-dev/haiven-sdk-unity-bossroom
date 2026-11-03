@@ -27,7 +27,10 @@ namespace Haiven.Demo.BossRoom.P2P
         private readonly Queue<PendingEvent> events = new Queue<PendingEvent>();
         private readonly Dictionary<ulong, Peer> peersByClient = new Dictionary<ulong, Peer>();
         private readonly Dictionary<string, Peer> peersByUser = new Dictionary<string, Peer>();
+        private const float RoundTripInterval = 1f;
+
         private ulong nextClientId = 1;
+        private float nextRoundTrip;
         private bool isServer;
         private bool started;
 
@@ -107,6 +110,12 @@ namespace Haiven.Demo.BossRoom.P2P
         public override NetworkEvent PollEvent(out ulong clientId, out ArraySegment<byte> payload, out float receiveTime)
         {
             if (events.Count == 0 && started && Signaling is IHaivenPeerSignalingLifecycle lifecycle) lifecycle.Poll();
+            if (started && Time.realtimeSinceStartup >= nextRoundTrip)
+            {
+                nextRoundTrip = Time.realtimeSinceStartup + RoundTripInterval;
+                foreach (var peer in peersByClient.Values)
+                    if (peer.Connected) peer.Link.Transport.RefreshRoundTripTime();
+            }
             if (events.Count == 0)
             {
                 clientId = 0;
@@ -132,8 +141,15 @@ namespace Haiven.Demo.BossRoom.P2P
             if (peersByClient.TryGetValue(HostClientId, out var peer)) Lose(peer, raiseEvent: false);
         }
 
-        // No RTT without reading the connection's stats; NGO only shows it.
-        public override ulong GetCurrentRtt(ulong clientId) => 0;
+        /// <summary>The round-trip time to a peer, from the WebRTC stats read once a second.</summary>
+        public bool TryGetRoundTripTime(ulong clientId, out long milliseconds)
+        {
+            milliseconds = peersByClient.TryGetValue(clientId, out var peer) ? peer.Link.Transport.RoundTripTimeMs : -1;
+            return milliseconds >= 0;
+        }
+
+        public override ulong GetCurrentRtt(ulong clientId) =>
+            TryGetRoundTripTime(clientId, out var milliseconds) ? (ulong)milliseconds : 0;
 
         public override void Shutdown()
         {

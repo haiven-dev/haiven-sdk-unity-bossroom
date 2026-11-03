@@ -102,6 +102,12 @@ namespace Haiven.Demo.BossRoom.P2P
         /// <summary>Bytes the library has accepted on this channel and not yet handed to the network.</summary>
         long BufferedAmount(PeerChannel channel);
 
+        /// <summary>The last measured round-trip time on the selected path, in milliseconds; -1 before the first measurement.</summary>
+        long RoundTripTimeMs { get; }
+
+        /// <summary>Starts a new measurement of <see cref="RoundTripTimeMs"/> unless one is running.</summary>
+        void RefreshRoundTripTime();
+
         /// <summary>Raised for each local candidate, to be sent through signaling.</summary>
         event Action<PeerIceCandidate>? LocalCandidate;
 
