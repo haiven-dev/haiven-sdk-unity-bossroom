@@ -38,6 +38,7 @@ namespace Haiven.Demo.BossRoom.Lobby
         private Text? statusText;
         private Text? roomText;
         private Button? copyButton;
+        private Button? dropButton;
         private InputField? nameInput;
         private InputField? codeInput;
         private Button? visibilityButton;
@@ -108,6 +109,7 @@ namespace Haiven.Demo.BossRoom.Lobby
                 : (lobby.Hosting ? "Hosting" : "In") + " a Haiven room · " + lobby.Status
                   + (lobby.ShareCode != null ? "   Code: " + lobby.ShareCode : "");
             copyButton!.gameObject.SetActive(lobby.ShareCode != null);
+            dropButton!.interactable = current != null;
         }
 
         private GameObject Row(SessionListing room, bool idle)
@@ -257,7 +259,7 @@ namespace Haiven.Demo.BossRoom.Lobby
             rect.anchorMin = rect.anchorMax = rect.pivot = new Vector2(0.5f, 0f);
             rect.anchoredPosition = new Vector2(0f, 16f);
             rect.sizeDelta = new Vector2(1100f, 44f);
-            roomText = Label(rect, "Room", "", 15, FontStyle.Normal, new Vector2(16f, -2f), new Vector2(940f, 40f));
+            roomText = Label(rect, "Room", "", 15, FontStyle.Normal, new Vector2(16f, -2f), new Vector2(780f, 40f));
             roomText.color = HaivenBossRoomMenuConfiguration.GoldText;
             copyButton = ButtonControl(rect, "Copy Code", "Copy code", new Vector2(-12f, -4f), new Vector2(120f, 36f));
             Anchor((RectTransform)copyButton.transform, new Vector2(1f, 1f));
@@ -265,6 +267,15 @@ namespace Haiven.Demo.BossRoom.Lobby
             {
                 if (lobby?.ShareCode != null) GUIUtility.systemCopyBuffer = lobby.ShareCode;
             });
+
+            // For trying the resume by hand: closes the Haiven socket the way a
+            // dropped network does. Only in the editor and development builds.
+            dropButton = ButtonControl(rect, "Drop Connection", "Drop Haiven link", new Vector2(-144f, -4f), new Vector2(170f, 36f));
+            Anchor((RectTransform)dropButton.transform, new Vector2(1f, 1f));
+            dropButton.onClick.AddListener(() => lobby?.DropHaivenConnection());
+#if !UNITY_EDITOR && !DEVELOPMENT_BUILD
+            dropButton.gameObject.SetActive(false);
+#endif
         }
 
         // Boss Room builds its main menu anew each time the scene loads, so the

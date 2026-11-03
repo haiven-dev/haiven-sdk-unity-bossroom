@@ -24,7 +24,7 @@ namespace Haiven.Demo.BossRoom.Lobby
     {
         private static readonly float[] RetryDelays = { 1f, 2f, 4f };
 
-        private readonly SessionChannel channel;
+        private SessionChannel channel;
         private readonly string sessionId;
         private readonly Func<float> clock;
         private readonly Dictionary<string, Outgoing> outgoing = new Dictionary<string, Outgoing>();
@@ -71,6 +71,29 @@ namespace Haiven.Demo.BossRoom.Lobby
             outgoing.Clear();
             incoming.Clear();
             unacknowledged.Clear();
+        }
+
+        /// <summary>
+        /// Moves to the socket the session resumed on (SDK-P2P-5). Messages not yet
+        /// acknowledged go out again on it, since the old socket may have lost them.
+        /// </summary>
+        public void Rebind(SessionChannel resumed)
+        {
+            if (resumed == channel) return;
+            if (running)
+            {
+                channel.Event -= OnEvent;
+                channel.Lost -= OnLost;
+                resumed.Event += OnEvent;
+                resumed.Lost += OnLost;
+            }
+            channel = resumed;
+            var now = clock();
+            foreach (var message in unacknowledged)
+            {
+                message.NextTry = now;
+                message.Retries = Math.Min(message.Retries, RetryDelays.Length - 1);
+            }
         }
 
         public void Poll()

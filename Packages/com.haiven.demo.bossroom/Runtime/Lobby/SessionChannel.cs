@@ -46,6 +46,15 @@ namespace Haiven.Demo.BossRoom.Lobby
 
         public bool IsOpen => session.State == HaivenSessionState.Authenticated && connectionId != null;
 
+        /// <summary>
+        /// Takes the id from whoever saw <c>auth.success</c>, for a channel made
+        /// after the socket had already authenticated.
+        /// </summary>
+        public void UseConnectionId(string id)
+        {
+            if (connectionId == null && id.Length > 0) connectionId = id;
+        }
+
         /// <summary>A server event, on the main thread: its type and payload.</summary>
         public event Action<string, IHaivenJsonNode>? Event;
 
@@ -55,6 +64,7 @@ namespace Haiven.Demo.BossRoom.Lobby
         /// <summary>Sends one operation and waits for its correlated reply.</summary>
         public async Task<ServerFrame> RequestAsync(string type, object? payload, TimeSpan timeout)
         {
+            if (session.State == HaivenSessionState.Closed) throw new InvalidOperationException("haiven: the game socket is closed");
             var sent = session.Send(type, payload);
             var reply = Wait(sent.RequestId);
             var finished = await Task.WhenAny(reply.Task, Task.Delay(timeout)).ConfigureAwait(true);
@@ -66,6 +76,9 @@ namespace Haiven.Demo.BossRoom.Lobby
         /// <summary>Sends one operation without waiting; a refusal comes back through <paramref name="onReply"/>.</summary>
         public void Send(string type, object? payload, Action<ServerFrame>? onReply = null)
         {
+            // A closed socket drops the message; signaling sends it again on the
+            // socket the session resumes on.
+            if (session.State == HaivenSessionState.Closed) return;
             var sent = session.Send(type, payload);
             // Claimed even when nobody reads it, so its reply is not parked forever.
             var reply = Wait(sent.RequestId);

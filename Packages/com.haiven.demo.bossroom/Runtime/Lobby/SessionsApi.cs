@@ -48,6 +48,15 @@ namespace Haiven.Demo.BossRoom.Lobby
         public string? JoinCode;
         public string? JoinPayload;
         public string State = "";
+
+        /// <summary>The proof for <c>session.resume</c>, kept in memory only (SDK-P2P-2); empty for a roster read.</summary>
+        public string ResumeToken = "";
+
+        /// <summary>The socket the participation is bound to; it moves with every resume.</summary>
+        public string ConnectionId = "";
+
+        /// <summary>The members' user ids, from a roster read; empty for create and join.</summary>
+        public List<string> Members = new List<string>();
     }
 
     /// <summary>
@@ -109,18 +118,19 @@ namespace Haiven.Demo.BossRoom.Lobby
             bool allowMixedAges,
             CancellationToken cancellationToken = default)
         {
+            var resumeToken = NewResumeToken();
             var request = new Dictionary<string, object?>
             {
                 ["connectionId"] = connectionId,
                 ["admissionId"] = Guid.NewGuid().ToString("D"),
-                ["resumeToken"] = NewResumeToken(),
+                ["resumeToken"] = resumeToken,
                 ["visibility"] = Wire(visibility),
                 ["maxMembers"] = maxMembers,
                 ["allowMixedAges"] = allowMixedAges,
                 ["metadata"] = new Dictionary<string, object?> { ["name"] = name },
             };
             var body = await Post(Root, request, cancellationToken).ConfigureAwait(false);
-            return Admission(body);
+            return Bound(Admission(body), resumeToken, connectionId);
         }
 
         /// <summary>Joins a listed room, or a private or mixed room by its code.</summary>
@@ -130,16 +140,24 @@ namespace Haiven.Demo.BossRoom.Lobby
             string? joinCode,
             CancellationToken cancellationToken = default)
         {
+            var resumeToken = NewResumeToken();
             var request = new Dictionary<string, object?>
             {
                 ["connectionId"] = connectionId,
                 ["admissionId"] = Guid.NewGuid().ToString("D"),
-                ["resumeToken"] = NewResumeToken(),
+                ["resumeToken"] = resumeToken,
                 ["joinCode"] = string.IsNullOrEmpty(joinCode) ? null : joinCode,
             };
             var body = await Post(Root + "/" + Uri.EscapeDataString(sessionId) + "/members", request, cancellationToken)
                 .ConfigureAwait(false);
-            return Admission(body);
+            return Bound(Admission(body), resumeToken, connectionId);
+        }
+
+        private static SessionAdmission Bound(SessionAdmission admission, string resumeToken, string connectionId)
+        {
+            admission.ResumeToken = resumeToken;
+            admission.ConnectionId = connectionId;
+            return admission;
         }
 
         /// <summary>Reads the room as a member sees it, which a create does not return in full.</summary>
@@ -164,8 +182,16 @@ namespace Haiven.Demo.BossRoom.Lobby
         {
             if (string.IsNullOrEmpty(body)) throw new HaivenJsonException("haiven: the session response is empty");
             var root = HaivenJson.Parse(body!);
+            var members = new List<string>();
+            if (root.TryGetProperty("members", out var list))
+                foreach (var member in list.EnumerateArray())
+                {
+                    var userId = Text(member, "userId");
+                    if (userId.Length > 0) members.Add(userId);
+                }
             return new SessionAdmission
             {
+                Members = members,
                 SessionId = Text(root, "sessionId"),
                 ParticipationId = Text(root, "participationId"),
                 HostUserId = Text(root, "hostUserId"),
