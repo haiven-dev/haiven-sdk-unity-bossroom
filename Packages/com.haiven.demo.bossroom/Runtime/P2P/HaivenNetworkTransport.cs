@@ -50,6 +50,23 @@ namespace Haiven.Demo.BossRoom.P2P
         public override ulong ServerClientId => HostClientId;
 
         /// <summary>The Haiven user id behind an NGO client id, or null when there is no such peer.</summary>
+        /// <summary>The data channels to this user opened; raised once per connection, on the main thread.</summary>
+        public event Action<string>? PeerConnected;
+
+        /// <summary>The connection to this user ended, for any reason; raised once, on the main thread.</summary>
+        public event Action<string>? PeerDisconnected;
+
+        /// <summary>
+        /// Closes the connection to a user the session no longer admits, and tells
+        /// NGO the client left. The host calls it on <c>session.member.left</c>.
+        /// </summary>
+        public bool DropUser(string userId)
+        {
+            if (!peersByUser.TryGetValue(userId, out var peer) || peer.Lost) return false;
+            Lose(peer, raiseEvent: true, sayGoodbye: true);
+            return true;
+        }
+
         public string? GetUserId(ulong clientId) =>
             peersByClient.TryGetValue(clientId, out var peer) ? peer.UserId : null;
 
@@ -248,6 +265,7 @@ namespace Haiven.Demo.BossRoom.P2P
             {
                 if (peer.Lost) return;
                 peer.Connected = true;
+                PeerConnected?.Invoke(peer.UserId);
                 Enqueue(NetworkEvent.Connect, clientId, default);
             };
             peer.Link.Message += (message, reliable) => OnMessage(peer, message, reliable);
@@ -396,6 +414,7 @@ namespace Haiven.Demo.BossRoom.P2P
                 peer.Link.Dispose();
             }
             if (raiseEvent && (peer.Connected || !isServer)) Enqueue(NetworkEvent.Disconnect, peer.ClientId, default);
+            if (peer.Connected) PeerDisconnected?.Invoke(peer.UserId);
         }
 
         private static async Task DisposeAfterGoodbye(HaivenPeerLink link)
