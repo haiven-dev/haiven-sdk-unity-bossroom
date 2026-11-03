@@ -73,6 +73,11 @@ namespace Haiven.Demo.BossRoom
         private string missingSettings = "";
         private Func<string, string?> readSetting = System.Environment.GetEnvironmentVariable;
         private string projectConfigurationJson = "";
+
+        /// <summary>The running demo, for the lobby; null before boot and after it is destroyed.</summary>
+        internal static HaivenBossRoomDemo? Current { get; private set; }
+
+        internal DemoSettings? Settings => settings;
         private DateTime nextProjectConfigurationCheckUtc = DateTime.MinValue;
         private bool destroyed;
         private readonly DemoVictoryReward victory = new DemoVictoryReward();
@@ -157,6 +162,7 @@ namespace Haiven.Demo.BossRoom
             DontDestroyOnLoad(host);
             var demo = host.AddComponent<HaivenBossRoomDemo>();
             demo.settings = loaded;
+            Current = demo;
             demo.readSetting = ReadSetting;
             demo.missingSettings = missing;
             demo.projectConfigurationJson = projectConfigurationJson;
@@ -439,6 +445,7 @@ namespace Haiven.Demo.BossRoom
 
         private void OnDestroy()
         {
+            if (Current == this) Current = null;
             destroyed = true;
             lifetime.Cancel();
             SceneManager.sceneLoaded -= WatchPostGame;

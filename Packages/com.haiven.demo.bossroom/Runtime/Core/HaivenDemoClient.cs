@@ -35,6 +35,15 @@ namespace Haiven.Demo.BossRoom
         private const long HistoryPageSize = 50;
         private int membershipRecovery;
 
+        /// <summary>The game socket's session, for the lobby's session operations and signaling.</summary>
+        internal HaivenSessionCore Session => session;
+
+        /// <summary>The signed-in REST transport.</summary>
+        internal IRestApiTransport Rest => rest;
+
+        /// <summary>The server's id for the game socket, from <c>auth.success</c>; null before it.</summary>
+        internal string? ConnectionId { get; private set; }
+
         public HaivenDemoClient(
             DemoSettings settings,
             IHaivenSocket socket,
@@ -49,6 +58,15 @@ namespace Haiven.Demo.BossRoom
             api = new RestApi(rest);
             rewards = new RewardClaims(api);
             session = new HaivenSessionCore(socket, token);
+            // The lobby binds sessions to this socket, and the server names it
+            // only in auth.success, long before the lobby opens.
+            session.FrameReceived += received =>
+            {
+                if (received.Frame.Type == "auth.success" && received.Frame.Payload != null
+                    && received.Frame.Payload.TryGetProperty("connectionId", out var id)
+                    && id.Kind == Haiven.Sdk.Json.HaivenJsonKind.String)
+                    ConnectionId = id.GetString();
+            };
             session.Authenticated += () => post(() =>
             {
                 ConnectionStatus = "ONLINE · AUTHENTICATED";

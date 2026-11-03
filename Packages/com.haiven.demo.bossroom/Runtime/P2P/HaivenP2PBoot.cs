@@ -66,19 +66,30 @@ namespace Haiven.Demo.BossRoom.P2P
             var existing = manager.GetComponent<HaivenNetworkTransport>();
             if (existing != null) return existing;
 
-            var unityTransport = manager.GetComponent<UnityTransport>();
             var transport = manager.gameObject.AddComponent<HaivenNetworkTransport>();
-            transport.Signaling = new TcpPeerSignaling(() => unityTransport != null
-                ? (unityTransport.ConnectionData.Address, unityTransport.ConnectionData.Port)
-                : ("127.0.0.1", (ushort)9998));
-            transport.Connection = ConnectionFromEnvironment();
-            // One TURN credential per connection: coturn counts allocations per
-            // username (user-quota), as it does for haiven-api's credentials.
-            transport.CreateTransport = _ => new UnityWebRtcPeerTransport(ConnectionFromEnvironment());
+            Reconfigure(transport);
             manager.NetworkConfig.NetworkTransport = transport;
             Debug.Log("[haiven-p2p] Boss Room runs over the Haiven WebRTC transport ("
                 + (transport.Connection.Policy == PeerIcePolicy.Relay ? "relay-only" : "direct") + ")");
             return transport;
+        }
+
+        /// <summary>
+        /// Gives the transport the Direct IP settings: TCP signaling on the IP
+        /// window's address and port, and TURN from the environment. The lobby
+        /// calls it when a Haiven room ends, so Direct IP works again after one.
+        /// </summary>
+        public static void Reconfigure(HaivenNetworkTransport transport)
+        {
+            var unityTransport = transport.GetComponent<UnityTransport>();
+            transport.Signaling = new TcpPeerSignaling(() => unityTransport != null
+                ? (unityTransport.ConnectionData.Address, unityTransport.ConnectionData.Port)
+                : ("127.0.0.1", (ushort)9998));
+            transport.HostUserId = null;
+            transport.Connection = ConnectionFromEnvironment();
+            // One TURN credential per connection: coturn counts allocations per
+            // username (user-quota), as it does for haiven-api's credentials.
+            transport.CreateTransport = _ => new UnityWebRtcPeerTransport(ConnectionFromEnvironment());
         }
 
         private static PeerConnectionOptions ConnectionFromEnvironment()
