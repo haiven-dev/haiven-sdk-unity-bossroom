@@ -100,8 +100,9 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             Assert.That(pair.Guest.Send(Bytes(1200, 5), reliable: false), Is.EqualTo(PeerSendResult.Dropped));
             Debug.Log($"[haiven-webrtc] reliable 64 KiB messages accepted before send_queue_full: {sent}");
 
-            // Everything the queue accepted arrives, in order.
-            yield return Until(() => pair.HostReceived.Count(m => m.Reliable) == sent);
+            // Everything the queue accepted arrives, in order. About 3.3 MiB
+            // through a 256 KB/s relay takes 13 to 20 seconds.
+            yield return Until(() => pair.HostReceived.Count(m => m.Reliable) == sent, 60f);
             var reliable = pair.HostReceived.Where(m => m.Reliable).ToList();
             for (var i = 0; i < sent; i++) Assert.That(reliable[i].Payload[0], Is.EqualTo((byte)i));
             Assert.That(pair.Guest.Send(Bytes(65536, 6), reliable: true), Is.EqualTo(PeerSendResult.Sent));
@@ -167,9 +168,9 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             return bytes;
         }
 
-        private static IEnumerator Until(Func<bool> condition)
+        private static IEnumerator Until(Func<bool> condition, float timeout = Timeout)
         {
-            var deadline = Time.realtimeSinceStartup + Timeout;
+            var deadline = Time.realtimeSinceStartup + timeout;
             while (!condition())
             {
                 if (Time.realtimeSinceStartup > deadline) Assert.Fail("timed out");
