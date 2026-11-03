@@ -210,6 +210,43 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
         }
 
         [Test]
+        public void AMessageLostWithTheOldSocketGoesOutOnTheResumedOne()
+        {
+            var server = new FakeSignalingServer();
+            var now = 0f;
+            var (_, hostChannel) = server.Connect(Host);
+            var (_, guestChannel) = server.Connect(Guest);
+            var host = new SessionPeerSignaling(hostChannel, server.SessionId, Host, null, () => now);
+            var guest = new SessionPeerSignaling(guestChannel, server.SessionId, Guest, Host, () => now);
+            host.Start(asHost: true);
+            guest.Start(asHost: false);
+            var arrived = new List<string>();
+            host.Received += (_, signal) => arrived.Add(signal.Kind + ":" + signal.Sdp);
+
+            // The guest's socket drops with its offer: the server never relays it.
+            server.DropSignals = 1;
+            guest.Send(Host, PeerSignal.Offer("offer-sdp"));
+            host.Poll();
+            Assert.That(arrived, Is.Empty);
+
+            // The demo opens a new socket and the session resumes on it.
+            var (_, resumedChannel) = server.Connect(Guest);
+            guest.Rebind(resumedChannel);
+            guest.Poll();
+            host.Poll();
+            guest.Poll();
+            Assert.That(arrived, Is.EqualTo(new[] { "Offer:offer-sdp" }), "the unacknowledged offer went out again at once");
+            Assert.That(guest.PendingAcknowledgements, Is.Zero, "the acknowledgement reached the resumed socket");
+        }
+
+        [Test]
+        public void TheHostDropsPeersTheRosterNoLongerLists()
+        {
+            Assert.That(HaivenLobby.NotOnRoster(new[] { "a", "b", "c" }, new[] { "host", "a", "c" }), Is.EqualTo(new[] { "b" }));
+            Assert.That(HaivenLobby.NotOnRoster(new[] { "a" }, new[] { "a" }), Is.Empty);
+        }
+
+        [Test]
         public void SignalDataRoundTripsEveryKind()
         {
             var candidate = PeerSignal.ForCandidate(new PeerIceCandidate("candidate:1 1 udp 1 10.0.0.1 9 typ host", "0", 0));

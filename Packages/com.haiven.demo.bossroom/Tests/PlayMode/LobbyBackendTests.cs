@@ -135,6 +135,124 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
             Assert.That(after!.Any(room => room.SessionId == created.SessionId), Is.False, "the closed room is no longer listed");
         }
 
+        /// <summary>
+        /// A guest whose game socket drops resumes on a new one within the 30-second
+        /// window: the participation moves to the new connection and stays on the
+        /// roster. A resume with the wrong proof is refused.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator AGuestResumesOnANewSocketWithinTheWindow()
+        {
+            if (!Configured(out var baseUrl, out var appId, out var integration)) yield break;
+            Player? host = null, guest = null;
+            SessionAdmission? created = null, joined = null;
+            yield return Run(async () =>
+            {
+                host = await Player.SignInAsync(baseUrl, appId, integration, "lobby-resume-host-" + Short());
+                guest = await Player.SignInAsync(baseUrl, appId, integration, "lobby-resume-guest-" + Short());
+            });
+            disposables.Add(host!);
+            yield return Until(() => host!.Channel.IsOpen && guest!.Channel.IsOpen, "both game sockets authenticated");
+            yield return Run(async () =>
+            {
+                created = await host!.Api.CreateAsync(host.Channel.ConnectionId!, "Resume test", SessionVisibility.Public, 4, false);
+                joined = await guest!.Api.JoinAsync(guest.Channel.ConnectionId!, created.SessionId, null);
+            });
+            Assert.That(joined!.ResumeToken, Has.Length.EqualTo(43));
+            Assert.That(joined.ConnectionId, Is.EqualTo(guest!.Channel.ConnectionId));
+
+            // The socket drops; the same signed-in player opens another.
+            Player? again = null;
+            yield return Run(async () => again = await guest.ReconnectAsync());
+            disposables.Add(again!);
+            yield return Until(() => again!.Channel.IsOpen, "the new game socket authenticated");
+            Assert.That(again!.Channel.ConnectionId, Is.Not.EqualTo(joined.ConnectionId));
+
+            ServerFrame? wrong = null, resumed = null;
+            yield return Run(async () =>
+            {
+                wrong = await again.Channel.RequestAsync("session.resume", Resume(joined, "A" + joined.ResumeToken.Substring(1)), TimeSpan.FromSeconds(10));
+                resumed = await again.Channel.RequestAsync("session.resume", Resume(joined, joined.ResumeToken), TimeSpan.FromSeconds(10));
+            });
+            Assert.That(wrong!.Success, Is.False);
+            Assert.That(wrong.Error, Is.EqualTo("session_not_found"), "a wrong proof gets the same refusal as a missing session");
+            Assert.That(resumed!.Success, Is.True, resumed.Error);
+            Assert.That(SessionsApi.Text(resumed.Payload!, "connectionId"), Is.EqualTo(again.Channel.ConnectionId));
+
+            SessionAdmission? roster = null;
+            yield return Run(async () => roster = await host!.Api.RosterAsync(created!.SessionId));
+            Assert.That(roster!.Members, Has.Count.EqualTo(2), "the guest is still in the room");
+            yield return Run(() => host!.Api.LeaveAsync(created!.SessionId));
+        }
+
+        /// <summary>
+        /// After the window the server ends the participation itself
+        /// (connection_lost): a late resume is refused, and the roster the host
+        /// reads no longer lists the guest, so the host drops it.
+        /// </summary>
+        [UnityTest, Timeout(120000)]
+        public IEnumerator AResumeAfterTheWindowIsRefusedAndTheRosterDropsTheGuest()
+        {
+            if (!Configured(out var baseUrl, out var appId, out var integration)) yield break;
+            Player? host = null, guest = null;
+            SessionAdmission? created = null, joined = null;
+            yield return Run(async () =>
+            {
+                host = await Player.SignInAsync(baseUrl, appId, integration, "lobby-late-host-" + Short());
+                guest = await Player.SignInAsync(baseUrl, appId, integration, "lobby-late-guest-" + Short());
+            });
+            disposables.Add(host!);
+            yield return Until(() => host!.Channel.IsOpen && guest!.Channel.IsOpen, "both game sockets authenticated");
+            yield return Run(async () =>
+            {
+                created = await host!.Api.CreateAsync(host.Channel.ConnectionId!, "Late resume test", SessionVisibility.Public, 4, false);
+                joined = await guest!.Api.JoinAsync(guest.Channel.ConnectionId!, created.SessionId, null);
+            });
+            guest!.Dispose();
+
+            // 30 seconds of window and up to one 10-second tick of the liveness worker.
+            var waitUntil = Time.realtimeSinceStartup + 45f;
+            while (Time.realtimeSinceStartup < waitUntil) yield return null;
+
+            Player? again = null;
+            ServerFrame? late = null;
+            SessionAdmission? roster = null;
+            yield return Run(async () =>
+            {
+                again = await Player.ConnectAsync(baseUrl, appId, guest.Token);
+                roster = await host!.Api.RosterAsync(created!.SessionId);
+            });
+            disposables.Add(again!);
+            yield return Until(() => again!.Channel.IsOpen, "the new game socket authenticated");
+            yield return Run(async () => late = await again!.Channel.RequestAsync("session.resume", Resume(joined!, joined!.ResumeToken), TimeSpan.FromSeconds(10)));
+            Assert.That(late!.Success, Is.False);
+            Assert.That(late.Error, Is.EqualTo("session_not_found"));
+            Assert.That(roster!.Members, Has.Count.EqualTo(1), "the server ended the guest's participation");
+            Assert.That(HaivenLobby.NotOnRoster(new[] { joined.HostUserId, "guest-on-the-host" }, roster.Members),
+                Is.EqualTo(new[] { "guest-on-the-host" }));
+            yield return Run(() => host!.Api.LeaveAsync(created!.SessionId));
+        }
+
+        private static Dictionary<string, object?> Resume(SessionAdmission admission, string token) =>
+            new Dictionary<string, object?>
+            {
+                ["participationId"] = admission.ParticipationId,
+                ["previousConnectionId"] = admission.ConnectionId,
+                ["resumeToken"] = token,
+            };
+
+        private static bool Configured(out string baseUrl, out string appId, out string integration)
+        {
+            baseUrl = Environment.GetEnvironmentVariable("HAIVEN_LOBBY_BASE_URL") ?? "";
+            appId = Environment.GetEnvironmentVariable("HAIVEN_LOBBY_APP_ID") ?? "";
+            integration = Environment.GetEnvironmentVariable("HAIVEN_LOBBY_INTEGRATION_ID") ?? "";
+            if (baseUrl.Length == 0 || appId.Length == 0 || integration.Length == 0)
+                Assert.Ignore("HAIVEN_LOBBY_BASE_URL, HAIVEN_LOBBY_APP_ID and HAIVEN_LOBBY_INTEGRATION_ID are not set");
+            return true;
+        }
+
+        private static string Short() => Guid.NewGuid().ToString("N").Substring(0, 6);
+
         private NetworkManager Manager(string name, SessionPeerSignaling signaling, string? hostUserId, PeerConnectionOptions ice)
         {
             var created = new GameObject("lobby " + name);
@@ -180,9 +298,17 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
             private readonly SystemNetSocket socket;
             private readonly HaivenSessionCore session;
             private readonly BearerRestTransport rest;
+            private bool disposed;
 
-            private Player(SystemNetSocket socket, HaivenSessionCore session, SessionChannel channel, BearerRestTransport rest, SessionsApi api)
+            private readonly string baseUrl;
+            private readonly string appId;
+
+            private Player(string baseUrl, string appId, string token, SystemNetSocket socket, HaivenSessionCore session,
+                SessionChannel channel, BearerRestTransport rest, SessionsApi api)
             {
+                this.baseUrl = baseUrl;
+                this.appId = appId;
+                Token = token;
                 this.socket = socket;
                 this.session = session;
                 this.rest = rest;
@@ -194,9 +320,20 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
 
             public SessionsApi Api { get; }
 
-            public static async Task<Player> SignInAsync(string baseUrl, string appId, string integration, string subject)
+            public string Token { get; }
+
+            public static async Task<Player> SignInAsync(string baseUrl, string appId, string integration, string subject) =>
+                await ConnectAsync(baseUrl, appId, await HandoffAsync(baseUrl, integration, subject));
+
+            /// <summary>Drops this socket and opens another for the same signed-in player.</summary>
+            public async Task<Player> ReconnectAsync()
             {
-                var token = await HandoffAsync(baseUrl, integration, subject);
+                Dispose();
+                return await ConnectAsync(baseUrl, appId, Token);
+            }
+
+            public static async Task<Player> ConnectAsync(string baseUrl, string appId, string token)
+            {
                 var rest = new BearerRestTransport(baseUrl, appId, () => token);
                 var socket = new SystemNetSocket();
                 var session = new HaivenSessionCore(socket, () => token);
@@ -204,7 +341,7 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
                 var realtime = new Uri(baseUrl.Replace("http://", "ws://").Replace("https://", "wss://").TrimEnd('/') + "/ws");
                 await socket.ConnectAsync(realtime);
                 session.Opened();
-                return new Player(socket, session, channel, rest, new SessionsApi(rest, appId));
+                return new Player(baseUrl, appId, token, socket, session, channel, rest, new SessionsApi(rest, appId));
             }
 
             // The SDK's game login handoff by hand: PKCE S256 through the stack's
@@ -257,6 +394,8 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
 
             public void Dispose()
             {
+                if (disposed) return;
+                disposed = true;
                 Channel.Dispose();
                 session.Dispose();
                 socket.Dispose();

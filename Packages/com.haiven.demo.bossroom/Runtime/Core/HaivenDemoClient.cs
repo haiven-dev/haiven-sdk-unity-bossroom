@@ -44,6 +44,9 @@ namespace Haiven.Demo.BossRoom
         /// <summary>The server's id for the game socket, from <c>auth.success</c>; null before it.</summary>
         internal string? ConnectionId { get; private set; }
 
+        /// <summary>The socket closed, with the server's close code; raised on the game's thread.</summary>
+        internal event Action<int>? SocketClosed;
+
         public HaivenDemoClient(
             DemoSettings settings,
             IHaivenSocket socket,
@@ -86,6 +89,7 @@ namespace Haiven.Demo.BossRoom
                 Log.Note(DemoChatLog.SignInUnavailable);
                 PresentationChanged?.Invoke();
             });
+            session.Closed += (code, _) => post(() => SocketClosed?.Invoke(code));
             session.Closed += (code, reason) => post(() =>
             {
                 ConnectionStatus = "OFFLINE · " + code;

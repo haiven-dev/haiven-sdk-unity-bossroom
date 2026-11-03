@@ -56,6 +56,15 @@ namespace Haiven.Demo.BossRoom.P2P
         /// <summary>The connection to this user ended, for any reason; raised once, on the main thread.</summary>
         public event Action<string>? PeerDisconnected;
 
+        /// <summary>The users whose data channels are open, for the host's roster check.</summary>
+        public IReadOnlyList<string> ConnectedUsers()
+        {
+            var users = new List<string>();
+            foreach (var peer in peersByClient.Values)
+                if (peer.Connected && !peer.Lost) users.Add(peer.UserId);
+            return users;
+        }
+
         /// <summary>
         /// Closes the connection to a user the session no longer admits, and tells
         /// NGO the client left. The host calls it on <c>session.member.left</c>.
