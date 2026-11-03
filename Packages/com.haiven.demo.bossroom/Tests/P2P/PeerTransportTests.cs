@@ -141,19 +141,59 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             Assert.That(pair.HostReceived.Single(m => m.Reliable).Payload, Is.EqualTo(Bytes(65536, 8)));
         }
 
+        [UnityTest, Explicit("holds a relayed connection for twelve minutes"), Timeout(900000)]
+        public IEnumerator RelayedConnectionOutlivesItsCredential()
+        {
+            // haiven-api issues a 10-minute credential and says to fetch a new one
+            // after 8. This shows what happens to an open connection when the
+            // credential it allocated with expires and is never replaced: libwebrtc
+            // refreshes permissions after 4 minutes and the allocation before its
+            // 10-minute lifetime, each time with the same username.
+            const int lifetime = 120;
+            // Past the allocation refresh (lifetime 600 s, refreshed a minute
+            // early) and the channel binding refresh at 10 minutes.
+            const float hold = 720f;
+            var pair = Pair(TurnFromEnvironment(lifetime), TurnFromEnvironment(lifetime));
+            yield return pair.Connect();
+            Assert.That(pair.Host.IsOpen && pair.Guest.IsOpen, Is.True, pair.Failure);
+
+            var start = Time.realtimeSinceStartup;
+            var nextSend = start;
+            var lastArrival = start;
+            var seen = 0;
+            while (Time.realtimeSinceStartup - start < hold && pair.HostClosed == null && pair.GuestClosed == null)
+            {
+                if (Time.realtimeSinceStartup >= nextSend)
+                {
+                    pair.Guest.Send(Bytes(16, 9), reliable: false);
+                    nextSend += 1f;
+                }
+                if (pair.HostReceived.Count > seen)
+                {
+                    seen = pair.HostReceived.Count;
+                    lastArrival = Time.realtimeSinceStartup;
+                }
+                yield return null;
+            }
+            var report = $"credential expired at {lifetime} s; {seen} messages arrived, the last at "
+                + $"{lastArrival - start:F0} s; held {Time.realtimeSinceStartup - start:F0} s; {pair.Failure}";
+            Debug.Log("[haiven-webrtc] " + report);
+            Assert.That(lastArrival - start, Is.GreaterThan(hold - 5), report);
+        }
+
         private static PeerConnectionOptions Direct() =>
             new PeerConnectionOptions(Array.Empty<PeerIceServer>(), PeerIcePolicy.All);
 
         // The TURN REST scheme haiven-api issues: username "<expiry>:<id>",
         // password base64(HMAC-SHA1(secret, username)).
-        internal static PeerConnectionOptions TurnFromEnvironment()
+        internal static PeerConnectionOptions TurnFromEnvironment(int lifetimeSeconds = 600)
         {
             var url = Environment.GetEnvironmentVariable("HAIVEN_TEST_TURN_URL");
             var secret = Environment.GetEnvironmentVariable("HAIVEN_TEST_TURN_SECRET");
             if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(secret))
                 Assert.Ignore("HAIVEN_TEST_TURN_URL and HAIVEN_TEST_TURN_SECRET are not set");
 
-            var expiry = DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
+            var expiry = DateTimeOffset.UtcNow.AddSeconds(lifetimeSeconds).ToUnixTimeSeconds();
             var username = $"{expiry}:{Guid.NewGuid()}";
             using var hmac = new HMACSHA1(Encoding.UTF8.GetBytes(secret));
             var password = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(username)));
