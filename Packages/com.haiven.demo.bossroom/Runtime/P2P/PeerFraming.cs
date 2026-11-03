@@ -17,6 +17,13 @@ namespace Haiven.Demo.BossRoom.P2P
     {
         public const byte Unreliable = 0;
         public const byte UnreliableSequenced = 1;
+
+        /// <summary>
+        /// Sent on the unreliable channel when a side closes on purpose. Through
+        /// TURN the closing side's allocation goes with its connection, so without
+        /// it the other side learns only when ICE fails, about 15 seconds later.
+        /// </summary>
+        public const byte Goodbye = 2;
         public const int SequencedHeader = 3;
         public const int LengthPrefix = 4;
 
