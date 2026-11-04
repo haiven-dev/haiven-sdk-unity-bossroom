@@ -1,0 +1,130 @@
+#nullable enable
+using System;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
+using UnityEngine;
+
+namespace Haiven.Demo.BossRoom.P2P
+{
+    /// <summary>
+    /// Puts <see cref="HaivenNetworkTransport"/> under Boss Room's NetworkManager
+    /// when P2P is switched on, so Boss Room's "Direct IP" host and join run over
+    /// WebRTC. The IP window's address and port then name the host's TCP
+    /// signaling listener; game data goes over the data channels.
+    ///
+    /// Switched on by any of: the <c>-haiven-p2p</c> command-line argument,
+    /// <c>HAIVEN_P2P=1</c>, or the editor menu Haiven > P2P Transport.
+    /// <c>HAIVEN_P2P_TURN_URL</c> (one URL, or several separated by commas)
+    /// makes every session <c>relay-only</c> through that TURN server, the way a
+    /// session with a child runs. The credential is either issued elsewhere and
+    /// given as <c>HAIVEN_P2P_TURN_USERNAME</c> and <c>HAIVEN_P2P_TURN_CREDENTIAL</c>,
+    /// or minted here per connection from <c>HAIVEN_P2P_TURN_SECRET</c>, which only
+    /// a local test relay should use; in a Haiven session the game service issues it.
+    /// The Multiplayer Services session flow keeps Unity Transport and does not
+    /// work while P2P is on.
+    /// </summary>
+    public sealed class HaivenP2PBoot : MonoBehaviour
+    {
+        public const string EditorPrefsKey = "Haiven.Demo.BossRoom.P2P";
+
+        public static bool Enabled
+        {
+            get
+            {
+                if (Environment.GetCommandLineArgs().Contains("-haiven-p2p")) return true;
+                if (Environment.GetEnvironmentVariable("HAIVEN_P2P") == "1") return true;
+#if UNITY_EDITOR
+                if (UnityEditor.EditorPrefs.GetBool(EditorPrefsKey, false)) return true;
+#endif
+                return false;
+            }
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void Boot()
+        {
+            if (!Enabled) return;
+            var boot = new GameObject("Haiven P2P");
+            DontDestroyOnLoad(boot);
+            boot.AddComponent<HaivenP2PBoot>();
+        }
+
+        // The NetworkManager can come from a later scene, so wait for it.
+        private void Update()
+        {
+            var manager = NetworkManager.Singleton;
+            if (manager == null) return;
+            Install(manager);
+            Destroy(gameObject);
+        }
+
+        public static HaivenNetworkTransport Install(NetworkManager manager)
+        {
+            var existing = manager.GetComponent<HaivenNetworkTransport>();
+            if (existing != null) return existing;
+
+            var transport = manager.gameObject.AddComponent<HaivenNetworkTransport>();
+            Reconfigure(transport);
+            manager.NetworkConfig.NetworkTransport = transport;
+            Debug.Log("[haiven-p2p] Boss Room runs over the Haiven WebRTC transport ("
+                + (transport.Connection.Policy == PeerIcePolicy.Relay ? "relay-only" : "direct") + ")");
+            return transport;
+        }
+
+        /// <summary>
+        /// Gives the transport the Direct IP settings: TCP signaling on the IP
+        /// window's address and port, and TURN from the environment. The lobby
+        /// calls it when a Haiven room ends, so Direct IP works again after one.
+        /// </summary>
+        public static void Reconfigure(HaivenNetworkTransport transport)
+        {
+            var unityTransport = transport.GetComponent<UnityTransport>();
+            transport.Signaling = new TcpPeerSignaling(() => unityTransport != null
+                ? (unityTransport.ConnectionData.Address, unityTransport.ConnectionData.Port)
+                : ("127.0.0.1", (ushort)9998));
+            transport.HostUserId = null;
+            transport.Connection = ConnectionFromEnvironment();
+            // One TURN credential per connection: TURN server counts allocations per
+            // username (user-quota), as it does for the game service's credentials.
+            transport.CreateTransport = _ => new UnityWebRtcPeerTransport(ConnectionFromEnvironment());
+        }
+
+        private static PeerConnectionOptions ConnectionFromEnvironment()
+        {
+            var direct = new PeerConnectionOptions(Array.Empty<PeerIceServer>(), PeerIcePolicy.All);
+            var urls = (Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_URL") ?? "")
+                .Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(url => url.Trim())
+                .Where(url => url.Length > 0)
+                .ToArray();
+            if (urls.Length == 0) return direct;
+
+            // A credential issued elsewhere, the way the game service returns one in
+            // p2p.ice.servers; TURN server allows several allocations per username.
+            // Values are trimmed: a CR from a Windows shell breaks the HMAC.
+            var issuedUser = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_USERNAME")?.Trim();
+            var issuedPassword = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_CREDENTIAL")?.Trim();
+            if (!string.IsNullOrEmpty(issuedUser) && !string.IsNullOrEmpty(issuedPassword))
+                return new PeerConnectionOptions(
+                    new[] { new PeerIceServer(urls, issuedUser, issuedPassword) }, PeerIcePolicy.Relay);
+
+            var secret = Environment.GetEnvironmentVariable("HAIVEN_P2P_TURN_SECRET")?.Trim();
+            if (string.IsNullOrEmpty(secret))
+            {
+                Debug.LogWarning("[haiven-p2p] HAIVEN_P2P_TURN_URL is set without a credential or secret; playing direct");
+                return direct;
+            }
+
+            // The TURN REST scheme the game service issues: username "<expiry>:<id>",
+            // password base64(HMAC-SHA1(secret, username)).
+            var username = $"{DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()}:{Guid.NewGuid()}";
+            using var hmac = new HMACSHA1(Encoding.UTF8.GetBytes(secret));
+            var password = Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(username)));
+            return new PeerConnectionOptions(
+                new[] { new PeerIceServer(urls, username, password) }, PeerIcePolicy.Relay);
+        }
+    }
+}
