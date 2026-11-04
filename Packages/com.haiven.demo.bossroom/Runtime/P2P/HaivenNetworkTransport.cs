@@ -118,6 +118,13 @@ namespace Haiven.Demo.BossRoom.P2P
                     SendUnreliable(peer, PeerFraming.EncodeSequenced(payload, peer.NextSequence++));
                     break;
                 default:
+                    if (payload.Count > PeerFraming.MaxReliablePayload)
+                    {
+                        // The receiver refuses it, and the send queue could not hold it anyway.
+                        Debug.LogWarning($"[haiven-p2p] reliable message of {payload.Count} bytes to {peer.UserId} is above {PeerFraming.MaxReliablePayload}; disconnecting");
+                        Lose(peer, raiseEvent: true);
+                        return;
+                    }
                     foreach (var chunk in PeerFraming.EncodeReliable(payload))
                     {
                         var result = peer.Link.Send(chunk, reliable: true);

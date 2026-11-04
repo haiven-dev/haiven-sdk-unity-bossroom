@@ -66,6 +66,24 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
         }
 
         [UnityTest]
+        public IEnumerator TwoGuestsConnectAtTheSameTime()
+        {
+            var port = FreePort();
+            var host = Manager("host", port);
+            var first = Manager("first guest", port);
+            var second = Manager("second guest", port);
+
+            Assert.That(host.StartHost(), Is.True);
+            Assert.That(first.StartClient(), Is.True);
+            Assert.That(second.StartClient(), Is.True);
+            yield return Until(() => first.IsConnectedClient && second.IsConnectedClient && host.ConnectedClientsIds.Count == 3);
+
+            var names = new[] { first, second }
+                .Select(guest => ((TcpPeerSignaling)((HaivenNetworkTransport)guest.NetworkConfig.NetworkTransport).Signaling!).LocalUserId);
+            Assert.That(names, Is.EquivalentTo(new[] { "guest-1", "guest-2" }), "the second guest is named while the first stays");
+        }
+
+        [UnityTest]
         public IEnumerator BossRoomSessionRunsRelayOnlyThroughTurn()
         {
             // HaivenP2PBoot reads the same variables a player sets for the game.

@@ -147,7 +147,9 @@ namespace Haiven.Demo.BossRoom.P2P
                     guests[id] = link;
                     link.Write(new Wire { type = "welcome", id = id });
                 });
-                Read(link, id);
+                // Each guest is read on its own thread, so the next one is
+                // accepted while this one stays connected.
+                new Thread(() => Read(link, id)) { IsBackground = true, Name = "haiven-p2p-" + id }.Start();
             }
         }
 
