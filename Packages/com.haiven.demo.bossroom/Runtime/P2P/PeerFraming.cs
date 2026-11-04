@@ -27,6 +27,12 @@ namespace Haiven.Demo.BossRoom.P2P
         public const int SequencedHeader = 3;
         public const int LengthPrefix = 4;
 
+        /// <summary>
+        /// The largest reliable NGO message. A longer one cannot pass the 1 MiB
+        /// send queue, so a peer that declares one is not following this framing.
+        /// </summary>
+        public const int MaxReliablePayload = (int)HaivenPeerLink.MaxSendQueue - LengthPrefix;
+
         /// <summary>The largest NGO batch that fits an unreliable message with the largest header.</summary>
         public const int MaxUnreliablePayload = HaivenPeerLink.MaxUnreliableMessage - SequencedHeader;
 
@@ -104,7 +110,10 @@ namespace Haiven.Demo.BossRoom.P2P
                 if (expected < 0)
                 {
                     expected = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
-                    if (expected < 0) throw new InvalidOperationException("negative reliable message length");
+                    // Checked before allocating: the length comes from the peer.
+                    if (expected < 0 || expected > PeerFraming.MaxReliablePayload)
+                        throw new InvalidOperationException(
+                            $"reliable message length {(uint)expected} is above {PeerFraming.MaxReliablePayload}");
                     buffer = new byte[expected];
                     filled = 0;
                     if (expected > 0) continue;

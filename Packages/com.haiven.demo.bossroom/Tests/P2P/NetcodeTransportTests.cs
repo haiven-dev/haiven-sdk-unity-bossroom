@@ -102,6 +102,25 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             Assert.That(received[1], Is.EqualTo(new byte[] { 9, 8, 7 }));
             Assert.That(received[2], Is.Empty);
         }
+
+        [Test]
+        public void ReliableLengthAboveTheCapIsRefusedBeforeAllocating()
+        {
+            // 0x7FFFFFFF would ask for a 2 GiB buffer.
+            Assert.Throws<InvalidOperationException>(() => new ReliableAssembler().Add(new byte[] { 0x7F, 0xFF, 0xFF, 0xFF, 1 }));
+            Assert.Throws<InvalidOperationException>(() => new ReliableAssembler().Add(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }));
+
+            var cap = PeerFraming.MaxReliablePayload;
+            var over = new byte[] { (byte)((cap + 1) >> 24), (byte)((cap + 1) >> 16), (byte)((cap + 1) >> 8), (byte)(cap + 1) };
+            Assert.Throws<InvalidOperationException>(() => new ReliableAssembler().Add(over));
+
+            var largest = new byte[cap];
+            largest[cap - 1] = 42;
+            var assembler = new ReliableAssembler();
+            var received = PeerFraming.EncodeReliable(new ArraySegment<byte>(largest)).SelectMany(chunk => assembler.Add(chunk)).ToList();
+            Assert.That(received, Has.Count.EqualTo(1), "the largest message the sender allows still arrives");
+            Assert.That(received[0][cap - 1], Is.EqualTo(42));
+        }
     }
 
     /// <summary>
