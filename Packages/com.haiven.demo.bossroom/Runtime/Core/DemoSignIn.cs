@@ -300,7 +300,7 @@ namespace Haiven.Demo.BossRoom
             try
             {
                 var options = new HandoffOptions(
-                    new Uri(settings.SignInUrl),
+                    new Uri(DemoSettings.ExpandPlayer(settings.SignInUrl, Environment.GetCommandLineArgs())),
                     new Uri(settings.ExchangeUrl),
                     settings.IntegrationId,
                     new Uri(settings.RedirectUri));

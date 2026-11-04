@@ -156,6 +156,26 @@ namespace Haiven.Demo.BossRoom
         /// <summary>The handoff exchange endpoint under the REST base URL.</summary>
         public string ExchangeUrl => BaseUrl.TrimEnd('/') + "/auth/handoff/exchange";
 
+        /// <summary>The placeholder <see cref="ExpandPlayer"/> replaces in a sign-in URL.</summary>
+        public const string PlayerPlaceholder = "__player__";
+
+        /// <summary>
+        /// Replaces <see cref="PlayerPlaceholder"/> with this process's player:
+        /// the Multiplayer Play Mode name (<c>-name "Player 2"</c> becomes
+        /// <c>player-2</c>), else <c>main</c>. Against the local SDK demo stack,
+        /// <c>/connect/game?subject=__player__</c> then signs each player in as its
+        /// own account, which a lobby on one machine needs.
+        /// </summary>
+        public static string ExpandPlayer(string url, string[] commandLine)
+        {
+            if (url.IndexOf(PlayerPlaceholder, StringComparison.Ordinal) < 0) return url;
+            var name = "main";
+            var at = Array.IndexOf(commandLine, "-name");
+            if (at >= 0 && at + 1 < commandLine.Length && commandLine[at + 1].Trim().Length > 0)
+                name = commandLine[at + 1].Trim().ToLowerInvariant().Replace(' ', '-');
+            return url.Replace(PlayerPlaceholder, Uri.EscapeDataString(name));
+        }
+
         /// <summary><c>{origin}/connect/game</c> for an absolute base URL, otherwise empty.</summary>
         public static string DefaultSignInUrl(string baseUrl) =>
             Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsed)

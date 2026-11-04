@@ -25,7 +25,7 @@ namespace Unity.BossRoom.Utils.Editor
         {
             if (NetworkManager.Singleton != null && (NetworkManager.Singleton.IsClient || NetworkManager.Singleton.IsServer))
             {
-                var unityTransport = (UnityTransport)NetworkManager.Singleton.NetworkConfig.NetworkTransport;
+                var unityTransport = NetworkManager.Singleton.GetComponent<UnityTransport>();
 
                 // adding this preprocessor directive check since UnityTransport's simulator tools only inject latency in #UNITY_EDITOR or in #DEVELOPMENT_BUILD
 #if UNITY_EDITOR || DEVELOPMENT_BUILD

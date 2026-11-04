@@ -73,6 +73,11 @@ namespace Haiven.Demo.BossRoom
         private string missingSettings = "";
         private Func<string, string?> readSetting = System.Environment.GetEnvironmentVariable;
         private string projectConfigurationJson = "";
+
+        /// <summary>The running demo, for the lobby; null before boot and after it is destroyed.</summary>
+        internal static HaivenBossRoomDemo? Current { get; private set; }
+
+        internal DemoSettings? Settings => settings;
         private DateTime nextProjectConfigurationCheckUtc = DateTime.MinValue;
         private bool destroyed;
         private readonly DemoVictoryReward victory = new DemoVictoryReward();
@@ -157,6 +162,7 @@ namespace Haiven.Demo.BossRoom
             DontDestroyOnLoad(host);
             var demo = host.AddComponent<HaivenBossRoomDemo>();
             demo.settings = loaded;
+            Current = demo;
             demo.readSetting = ReadSetting;
             demo.missingSettings = missing;
             demo.projectConfigurationJson = projectConfigurationJson;
@@ -234,9 +240,36 @@ namespace Haiven.Demo.BossRoom
             PresentSignIn(signIn.Current);
         }
 
-        private async Task ConnectAsync()
+        /// <summary>
+        /// A dropped socket is opened again while the player stays signed in,
+        /// so a Haiven room can resume within its 30-second window (ADR 0036
+        /// point 7). The waits are 1, 2, 3, 4 and 5 seconds.
+        /// </summary>
+        internal const int ReconnectAttempts = 5;
+
+        // 1008 credential_revoked is a sign-out, not a drop: the room must not resume.
+        private const int CredentialRevoked = 1008;
+
+        private async Task ReconnectAfterDropAsync(HaivenDemoClient dropped, int code)
         {
-            if (settings == null || signIn == null || motd == null || destroyed) return;
+            if (code == CredentialRevoked || destroyed || client != dropped) return;
+            if (signIn == null || signIn.Current.State != DemoSignInState.SignedIn) return;
+            for (var attempt = 1; attempt <= ReconnectAttempts; attempt++)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(attempt));
+                // Something else replaced or dropped the client meanwhile: a sign-out or a new sign-in.
+                if (destroyed || client != dropped || signIn.Current.State != DemoSignInState.SignedIn) return;
+                Debug.Log($"[haiven-demo] the Haiven socket closed ({code}); reconnecting, attempt {attempt}");
+                Disconnect();
+                if (await ConnectAsync()) return;
+                if (client == null) return;
+                dropped = client;
+            }
+        }
+
+        private async Task<bool> ConnectAsync()
+        {
+            if (settings == null || signIn == null || motd == null || destroyed) return false;
             var current = signIn;
             rest = new BearerRestTransport(settings.BaseUrl, settings.AppId, () => current.AccessToken);
             socket = new SystemNetSocket();
@@ -252,6 +285,8 @@ namespace Haiven.Demo.BossRoom
             client.PresentationChanged += Redraw;
             client.RewardClaimed += RecordRewardClaimed;
             client.OperationFailed += ReportOperationFailed;
+            var created = client;
+            client.SocketClosed += code => _ = ReconnectAfterDropAsync(created, code);
             Redraw();
             var connecting = client;
             analytics?.Connecting();
@@ -259,11 +294,12 @@ namespace Haiven.Demo.BossRoom
             {
                 ShowConnectionStatus("CONNECTING · SOCKET");
                 await socket.ConnectAsync(new Uri(settings.RealtimeUrl));
-                if (destroyed || client != connecting) return;
+                if (destroyed || client != connecting) return false;
                 analytics?.SessionStarted();
                 ShowConnectionStatus("CONNECTED · AUTHENTICATING");
                 client.Start();
                 ClaimVictoryAfterSignIn(connecting);
+                return true;
             }
             catch (Exception error)
             {
@@ -274,6 +310,7 @@ namespace Haiven.Demo.BossRoom
                     ShowConnectionStatus("CONNECTION FAILED");
                     Show(DemoChatLog.ConnectionUnavailable);
                 }
+                return false;
             }
         }
 
@@ -439,6 +476,7 @@ namespace Haiven.Demo.BossRoom
 
         private void OnDestroy()
         {
+            if (Current == this) Current = null;
             destroyed = true;
             lifetime.Cancel();
             SceneManager.sceneLoaded -= WatchPostGame;

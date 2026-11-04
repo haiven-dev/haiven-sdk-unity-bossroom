@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "com.haiven.sdk": "0.0.0",
-    "com.unity.ugui": "1.0.0"
+    "com.unity.ugui": "1.0.0",
+    "com.unity.netcode.gameobjects": "2.4.3",
+    "com.unity.webrtc": "3.0.0"
   }
 }
