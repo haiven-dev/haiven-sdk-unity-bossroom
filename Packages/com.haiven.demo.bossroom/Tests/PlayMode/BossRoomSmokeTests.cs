@@ -17,15 +17,14 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
 {
     /// <summary>
     /// The assembled Boss Room project, booted from its own Startup scene, with
-    /// the demo pointed at sdks/unity/ci/fake-haiven.mjs and no access token: opening
+    /// the demo pointed at a local fake Haiven server and no access token: opening
     /// chat starts the browser handoff without the join dialog, the fake's sign-in
     /// page redirects to the demo's loopback callback, and the exchanged token connects
     /// chat. One send
     /// is accepted and one is held, the seeded item is in the inventory panel on
     /// connect, and a grant made while playing appears through the
-    /// entitlements.updated push. Run it with demos/bossroom/run_playmode.py,
-    /// which assembles the project, starts the fake, and sets HAIVEN_DEMO_* and
-    /// HAIVEN_FAKE_ORIGIN for the editor.
+    /// entitlements.updated push. The caller sets HAIVEN_DEMO_* and
+    /// HAIVEN_FAKE_ORIGIN. This test is not part of .github/workflows/build.yml.
     /// </summary>
     public class BossRoomSmokeTests
     {
@@ -38,7 +37,7 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
         public IEnumerator ChatAndItemEntitlementInBossRoom()
         {
             var origin = Environment.GetEnvironmentVariable("HAIVEN_FAKE_ORIGIN");
-            Assert.That(origin, Is.Not.Null.And.Not.Empty, "HAIVEN_FAKE_ORIGIN is unset; run demos/bossroom/run_playmode.py");
+            Assert.That(origin, Is.Not.Null.And.Not.Empty, "HAIVEN_FAKE_ORIGIN is unset");
 
             // Boss Room's own boot reaches for Unity Gaming Services and relay, which
             // are offline here. Its errors are not this test's; the assertions are.

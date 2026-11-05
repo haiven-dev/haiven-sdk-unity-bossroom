@@ -4,7 +4,7 @@
   "displayName": "Haiven SDK",
   "description": "Client SDK for Haiven WebSocket and game login handoff APIs in Unity, including WebGL.",
   "unity": "6000.0",
-  "documentationUrl": "https://github.com/haiven-dev/haiven-sdk/blob/main/sdks/unity/com.haiven.sdk/README.md",
+  "documentationUrl": "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/com.haiven.sdk/README.md",
   "keywords": [
     "haiven",
     "sdk",

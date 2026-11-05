@@ -1,0 +1,25 @@
+name: Build
+
+# Editor-pin and package-link checks. A Unity player build needs the pinned
+# 6000.0.52f1 editor, which this hosted runner does not have. A v* tag runs
+# the same checks and does not publish a release. leak_detect.yml still runs
+# on every push, including tags.
+on:
+  pull_request:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Editor pin and package links
+        run: python3 -m unittest ci.test_editor_pin -v

@@ -20,6 +20,13 @@ class EditorPinTests(unittest.TestCase):
         for name in ("com.haiven.sdk", "com.haiven.demo.bossroom"):
             manifest = json.loads((ROOT / "Packages" / name / "package.json").read_text())
             self.assertEqual(manifest["unity"], "6000.0", name)
+        sdk = json.loads((ROOT / "Packages/com.haiven.sdk/package.json").read_text())
+        docs = "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/com.haiven.sdk/README.md"
+        self.assertEqual(sdk["documentationUrl"], docs)
+        menu = (ROOT / "Packages/com.haiven.sdk/Editor/HaivenSdkMenu.cs").read_text()
+        self.assertIn(docs, menu)
+        self.assertNotIn("sdks/unity", menu)
+        self.assertNotIn("haiven-sdk.git?path=sdks/unity", (ROOT / "Packages/com.haiven.sdk/README.md").read_text())
 
     def test_demo_root_keeps_haiven_and_drops_upstream_tests(self):
         self.assertTrue((ROOT / "Assets").is_dir())
