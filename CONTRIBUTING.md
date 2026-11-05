@@ -1,3 +1,41 @@
+# Contributing to the Haiven Boss Room demo
+
+Contributions to the Haiven integration in this repository are welcome.
+Bug reports, fixes, and documentation improvements can start as a GitHub
+issue or a pull request.
+
+This repository's default branch is `main`. The upstream Boss Room guide
+below still describes the original sample, including its code of conduct.
+For changes here, follow this section instead of that guide's `develop`
+branch and Unity CLA steps. Boss Room remains under the license in
+`LICENSE.md`.
+
+## Issues
+
+Open a GitHub issue for a bug or a proposed change. Search open issues
+first. Include the Unity editor version and the steps that show the
+problem. Do not paste access tokens, passwords, or private endpoints.
+
+## Pull requests
+
+1. Fork the repository and branch from `main`.
+2. Keep the change focused. Do not reformat unrelated sample files.
+3. Use a [Conventional Commits](https://www.conventionalcommits.org/)
+   subject:
+
+   `type(scope): subject`
+
+   `type` is one of `feat`, `fix`, `docs`, `deps`, `style`, `refactor`,
+   `perf`, `test`, `build`, `ci`, `chore`, or `revert`. `scope` is
+   optional.
+4. Open the pull request against `main`. Say what changed and how you
+   checked it in the editor.
+
+Do not commit access tokens, passwords, private endpoints, or local
+editor credentials.
+
+The upstream Boss Room guide follows.
+
 # Contributing
 
 Thank you for your interest in contributing to BossRoom!
