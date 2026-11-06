@@ -36,9 +36,17 @@ editor credentials.
 
 ## Checks
 
-From the repository root, run:
+From the repository root, run the editor pin check. On Linux and macOS
+the interpreter is `python3`. On Windows, use `python`, the name a
+normal Python install provides when `python3` is not on `PATH`.
+
+Linux and macOS:
 
     python3 ci/test_editor_pin.py
+
+Windows:
+
+    python ci/test_editor_pin.py
 
 The script checks that `ProjectSettings/ProjectVersion.txt` names Unity
 editor `6000.0.52f1` and that the Haiven package `unity` fields stay on
@@ -47,9 +55,16 @@ editor `6000.0.52f1` and that the Haiven package `unity` fields stay on
 The Detect Project ID leak check reads
 `ProjectSettings/ProjectSettings.asset`. It fails when `cloudProjectId`
 has a value. From the repository root, run the same command as the
-Actions job `check` (Detect Project ID leak):
+Actions job `check` (Detect Project ID leak). That Ubuntu job keeps
+`python3`. On Windows, use `python` with the same arguments.
+
+Linux and macOS:
 
     python3 -c "import re; import sys;content=open('ProjectSettings/ProjectSettings.asset').read();res = re.search(r'.*cloudProjectId:.*\w+\s*\n', content)!=None;status = 1 if res else 0; print('status '+str(status)); sys.exit(res)"
+
+Windows:
+
+    python -c "import re; import sys;content=open('ProjectSettings/ProjectSettings.asset').read();res = re.search(r'.*cloudProjectId:.*\w+\s*\n', content)!=None;status = 1 if res else 0; print('status '+str(status)); sys.exit(res)"
 
 `status 0` means `cloudProjectId` is empty. Leave that field empty.
 
