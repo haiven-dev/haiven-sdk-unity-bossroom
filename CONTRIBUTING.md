@@ -1,3 +1,75 @@
+# Contributing to the Haiven Boss Room demo
+
+Contributions to the Haiven integration in this repository are welcome.
+Bug reports, fixes, and documentation improvements can start as a GitHub
+issue or a pull request.
+
+This repository's default branch is `main`. The upstream Boss Room guide
+below still describes the original sample, including its code of conduct.
+For changes here, follow this section instead of that guide's `develop`
+branch and Unity CLA steps. Boss Room remains under the license in
+`LICENSE.md`.
+
+## Issues
+
+Open a GitHub issue for a bug or a proposed change. Search open issues
+first. Include the Unity editor version and the steps that show the
+problem. Do not paste access tokens, passwords, or private endpoints.
+
+## Pull requests
+
+1. Fork the repository and branch from `main`.
+2. Keep the change focused. Do not reformat unrelated sample files.
+3. Use a [Conventional Commits](https://www.conventionalcommits.org/)
+   subject:
+
+   `type(scope): subject`
+
+   `type` is one of `feat`, `fix`, `docs`, `deps`, `style`, `refactor`,
+   `perf`, `test`, `build`, `ci`, `chore`, or `revert`. `scope` is
+   optional.
+4. Open the pull request against `main`. Run the checks below, say what
+   changed, and say how you checked the change in the editor.
+
+Do not commit access tokens, passwords, private endpoints, or local
+editor credentials.
+
+## Checks
+
+From the repository root, run the editor pin check. On Linux and macOS
+the interpreter is `python3`. On Windows, use `python`, the name a
+normal Python install provides when `python3` is not on `PATH`.
+
+Linux and macOS:
+
+    python3 ci/test_editor_pin.py
+
+Windows:
+
+    python ci/test_editor_pin.py
+
+The script checks that `ProjectSettings/ProjectVersion.txt` names Unity
+editor `6000.0.52f1` and that the Haiven package `unity` fields stay on
+`6000.0`. It is not a substitute for opening the project in that editor.
+
+The Detect Project ID leak check reads
+`ProjectSettings/ProjectSettings.asset`. It fails when `cloudProjectId`
+has a value. From the repository root, run the same command as the
+Actions job `check` (Detect Project ID leak). That Ubuntu job keeps
+`python3`. On Windows, use `python` with the same arguments.
+
+Linux and macOS:
+
+    python3 -c "import re; import sys;content=open('ProjectSettings/ProjectSettings.asset').read();res = re.search(r'.*cloudProjectId:.*\w+\s*\n', content)!=None;status = 1 if res else 0; print('status '+str(status)); sys.exit(res)"
+
+Windows:
+
+    python -c "import re; import sys;content=open('ProjectSettings/ProjectSettings.asset').read();res = re.search(r'.*cloudProjectId:.*\w+\s*\n', content)!=None;status = 1 if res else 0; print('status '+str(status)); sys.exit(res)"
+
+`status 0` means `cloudProjectId` is empty. Leave that field empty.
+
+The upstream Boss Room guide follows.
+
 # Contributing
 
 Thank you for your interest in contributing to BossRoom!
