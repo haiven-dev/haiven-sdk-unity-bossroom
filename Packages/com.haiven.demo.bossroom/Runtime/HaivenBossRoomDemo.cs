@@ -283,7 +283,6 @@ namespace Haiven.Demo.BossRoom
             client.Log.Changed += Redraw;
             client.ItemsChanged += Redraw;
             client.PresentationChanged += Redraw;
-            client.RewardClaimed += RecordRewardClaimed;
             client.OperationFailed += ReportOperationFailed;
             var created = client;
             client.SocketClosed += code => _ = ReconnectAfterDropAsync(created, code);
@@ -323,7 +322,6 @@ namespace Haiven.Demo.BossRoom
                 client.Log.Changed -= Redraw;
                 client.ItemsChanged -= Redraw;
                 client.PresentationChanged -= Redraw;
-                client.RewardClaimed -= RecordRewardClaimed;
                 client.OperationFailed -= ReportOperationFailed;
                 client.Dispose();
                 client = null;
@@ -518,8 +516,6 @@ namespace Haiven.Demo.BossRoom
 
         private void Submit(string text)
         {
-            // Only that a message was sent: never its text, channel, or sender.
-            if (client != null && text.Trim().Length > 0) analytics?.ChatMessageSent();
             client?.Send(text);
             chatView?.ClearInput();
         }
@@ -560,8 +556,6 @@ namespace Haiven.Demo.BossRoom
             renderedAnalyticsCounts = analytics.CountsText;
             statusView?.ShowConnectionStatus(status + " · " + renderedAnalyticsCounts);
         }
-
-        private void RecordRewardClaimed(string rewardRef) => analytics?.RewardClaimed(rewardRef);
 
         private void ReportOperationFailed(string operation, Exception error) =>
             _ = analytics?.ReportErrorAsync(operation, error);

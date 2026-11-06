@@ -19,6 +19,7 @@ namespace Haiven.Sdk.Contracts
 		public string Version { get; set; } = null!;
 	}
 
+	/// <summary>The payload a client sends on an auth frame, re-authenticating an open socket.</summary>
 	public sealed class WsAuthRequestV0
 	{
 		/// <summary>The replacement bearer token; it must resolve to the same identity the socket already authenticated with.</summary>

@@ -31,6 +31,7 @@ namespace Haiven.Sdk.Contracts
 		public string ExpiresAt { get; set; } = null!;
 	}
 
+	/// <summary>A user's current availability and status.</summary>
 	public sealed class PresenceV0
 	{
 		/// <summary>The user identifier.</summary>

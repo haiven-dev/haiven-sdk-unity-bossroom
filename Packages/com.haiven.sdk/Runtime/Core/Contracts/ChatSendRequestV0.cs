@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A request to submit a chat message.</summary>
 	public sealed class ChatSendRequestV0
 	{
 		/// <summary>The chat channel identifier.</summary>

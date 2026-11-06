@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A moderation decision made after the send or edit reply changed a message's state, sent only to its author's open sockets. It carries the author's own clientMessageId so the client can match it to the message it sent.</summary>
 	public sealed class ChatMessageModeratedV0
 	{
 		/// <summary>The chat message identifier.</summary>

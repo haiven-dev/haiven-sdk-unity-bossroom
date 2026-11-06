@@ -28,6 +28,7 @@ namespace Haiven.Sdk.Contracts
 		public string? AvatarFrame { get; set; }
 	}
 
+	/// <summary>A member of a chat community.</summary>
 	public sealed class ChatCommunityMemberV0
 	{
 		/// <summary>The chat community identifier.</summary>

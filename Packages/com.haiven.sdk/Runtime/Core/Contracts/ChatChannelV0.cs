@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A chat channel visible to a gaming client.</summary>
 	public sealed class ChatChannelV0
 	{
 		/// <summary>The chat community identifier.</summary>

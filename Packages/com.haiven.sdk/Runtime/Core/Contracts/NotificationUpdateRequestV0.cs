@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A request to update a notification's visible fields.</summary>
 	public sealed class NotificationUpdateRequestV0
 	{
 		/// <summary>The stable identifier of this value.</summary>

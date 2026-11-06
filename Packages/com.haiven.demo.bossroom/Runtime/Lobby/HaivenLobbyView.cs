@@ -1,5 +1,6 @@
 #nullable enable
 using System.Collections.Generic;
+using Haiven.Sdk;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
@@ -49,7 +50,7 @@ namespace Haiven.Demo.BossRoom.Lobby
         private Button? createButton;
         private Button? codeButton;
         private Button? refreshButton;
-        private SessionVisibility visibility = SessionVisibility.Public;
+        private HaivenSessionVisibility visibility = HaivenSessionVisibility.Public;
         private int maxPlayers = 4;
         private bool allowMixedAges;
         private bool open;
@@ -94,8 +95,8 @@ namespace Haiven.Demo.BossRoom.Lobby
             refreshButton!.interactable = idle;
             visibilityText!.text = "Who can join: " + VisibilityCaption(visibility);
             playersText!.text = maxPlayers + " players";
-            mixedButton!.interactable = idle && visibility != SessionVisibility.Public;
-            mixedText!.text = (allowMixedAges && visibility != SessionVisibility.Public ? "[x]" : "[ ]") + " Allow mixed ages";
+            mixedButton!.interactable = idle && visibility != HaivenSessionVisibility.Public;
+            mixedText!.text = (allowMixedAges && visibility != HaivenSessionVisibility.Public ? "[x]" : "[ ]") + " Allow mixed ages";
 
             foreach (var row in rows) Destroy(row);
             rows.Clear();
@@ -186,9 +187,9 @@ namespace Haiven.Demo.BossRoom.Lobby
             visibilityText = visibilityButton.GetComponentInChildren<Text>();
             visibilityButton.onClick.AddListener(() =>
             {
-                visibility = visibility == SessionVisibility.Public ? SessionVisibility.Friends
-                    : visibility == SessionVisibility.Friends ? SessionVisibility.Private : SessionVisibility.Public;
-                if (visibility == SessionVisibility.Public) allowMixedAges = false;
+                visibility = visibility == HaivenSessionVisibility.Public ? HaivenSessionVisibility.Friends
+                    : visibility == HaivenSessionVisibility.Friends ? HaivenSessionVisibility.Private : HaivenSessionVisibility.Public;
+                if (visibility == HaivenSessionVisibility.Public) allowMixedAges = false;
                 Render();
             });
             var fewer = ButtonControl(rect, "Fewer Players", "-", new Vector2(620f, -462f), new Vector2(40f, 40f));
@@ -344,10 +345,10 @@ namespace Haiven.Demo.BossRoom.Lobby
             return copy;
         }
 
-        internal static string VisibilityCaption(SessionVisibility value) => value switch
+        internal static string VisibilityCaption(HaivenSessionVisibility value) => value switch
         {
-            SessionVisibility.Public => "everyone (listed)",
-            SessionVisibility.Friends => "friends (listed)",
+            HaivenSessionVisibility.Public => "everyone (listed)",
+            HaivenSessionVisibility.Friends => "friends (listed)",
             _ => "with the code only",
         };
 

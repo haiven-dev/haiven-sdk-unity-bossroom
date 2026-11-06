@@ -82,6 +82,9 @@ namespace Haiven.Wire
 		public static readonly WsErrorCode ChildLiteAccessAvailable = new("child_lite_access_available");
 		public static readonly WsErrorCode ParentalConsentDenied = new("parental_consent_denied");
 		public static readonly WsErrorCode ClientClosedRequest = new("client_closed_request");
+		public static readonly WsErrorCode SessionNotFound = new("session_not_found");
+		public static readonly WsErrorCode PeerNotInSession = new("peer_not_in_session");
+		public static readonly WsErrorCode RelayUnavailable = new("relay_unavailable");
 
 		private static readonly HashSet<string> Registered = new()
 		{
@@ -149,6 +152,9 @@ namespace Haiven.Wire
 			"child_lite_access_available",
 			"parental_consent_denied",
 			"client_closed_request",
+			"session_not_found",
+			"peer_not_in_session",
+			"relay_unavailable",
 		};
 
 		public WsErrorCode(string value) => Value = value;

@@ -56,6 +56,16 @@ namespace Haiven.Wire
 		public static readonly MessageType AgegateUpdated = new("agegate.updated");
 		public static readonly MessageType EntitlementsUpdated = new("entitlements.updated");
 		public static readonly MessageType Motd = new("motd");
+		public static readonly MessageType SessionResume = new("session.resume");
+		public static readonly MessageType SessionPeerConnected = new("session.peer.connected");
+		public static readonly MessageType SessionMemberJoined = new("session.member.joined");
+		public static readonly MessageType SessionMemberLeft = new("session.member.left");
+		public static readonly MessageType SessionUpdated = new("session.updated");
+		public static readonly MessageType SessionClosed = new("session.closed");
+		public static readonly MessageType P2pSignal = new("p2p.signal");
+		public static readonly MessageType P2pSignalReceived = new("p2p.signal.received");
+		public static readonly MessageType P2pSignalAck = new("p2p.signal.ack");
+		public static readonly MessageType P2pIceServers = new("p2p.ice.servers");
 
 		private static readonly HashSet<string> Registered = new()
 		{
@@ -99,6 +109,16 @@ namespace Haiven.Wire
 			"agegate.updated",
 			"entitlements.updated",
 			"motd",
+			"session.resume",
+			"session.peer.connected",
+			"session.member.joined",
+			"session.member.left",
+			"session.updated",
+			"session.closed",
+			"p2p.signal",
+			"p2p.signal.received",
+			"p2p.signal.ack",
+			"p2p.ice.servers",
 		};
 
 		public MessageType(string value) => Value = value;

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A notification lookup request.</summary>
 	public sealed class NotificationGetRequestV0
 	{
 		/// <summary>The stable identifier of this value.</summary>

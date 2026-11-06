@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A user notification.</summary>
 	public sealed class NotificationV0
 	{
 		/// <summary>The stable identifier of this value.</summary>

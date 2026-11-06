@@ -31,6 +31,7 @@ namespace Haiven.Sdk.Contracts
 		public string? ExpiresAt { get; set; }
 	}
 
+	/// <summary>The payload of a presence update.</summary>
 	public sealed class WsPresenceEventV0
 	{
 		/// <summary>The user whose presence changed.</summary>

@@ -10,7 +10,8 @@
     "UnityEditor.TestRunner",
     "Haiven.Demo.BossRoom.P2P",
     "Unity.Netcode.Runtime",
-    "Unity.TextMeshPro"
+    "Unity.TextMeshPro",
+    "Haiven.Sdk.Samples.Netcode"
   ],
   "includePlatforms": [],
   "excludePlatforms": [

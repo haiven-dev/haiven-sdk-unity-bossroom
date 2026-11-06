@@ -37,14 +37,41 @@ namespace Haiven.Sdk.Tests
             var deadline = Time.realtimeSinceStartup + 10;
             while (tokenStore.Credential is null && Time.realtimeSinceStartup < deadline) yield return null;
             Assert.That(tokenStore.Credential, Is.Not.Null, "handoff timed out");
-            Assert.That(tokenStore.Credential.AccessToken, Is.EqualTo("unity-access"));
+            Assert.That(tokenStore.Credential.AccessToken, Is.EqualTo("header.eyJleHAiOjF9.signature"));
+            Assert.That(tokenStore.Credential.ExpiresAt, Is.GreaterThan(DateTimeOffset.FromUnixTimeSeconds(1)));
             Assert.That(completedThread, Is.EqualTo(unityThread));
             UnityEngine.Object.Destroy(host);
         }
 
+        [Test] public void CredentialEndReasonsClearAndStartFreshHandoff()
+        {
+            var browser = new Browser();
+            var tokens = new MemoryHandoffTokenStore();
+            var coordinator = new HandoffCoordinator(
+                new HandoffOptions(
+                    new Uri("https://app.haiven.gg/connect/game"),
+                    new Uri("https://api.haiven.gg/v0/auth/handoff/exchange"),
+                    "unity-test",
+                    new Uri("haiven-test://auth/callback")),
+                browser,
+                new MemoryHandoffTransactionStore(),
+                tokens,
+                new Exchange(),
+                new UnityHandoffDispatcher());
+
+            foreach (HandoffCredentialEndReason reason in Enum.GetValues(typeof(HandoffCredentialEndReason)))
+            {
+                tokens.Store(new HandoffCredential("rejected", "Bearer", DateTimeOffset.UtcNow.AddMinutes(5)));
+                coordinator.RestartLogin(reason);
+                Assert.That(tokens.Credential, Is.Null, reason.ToString());
+            }
+            Assert.That(browser.Opens, Is.EqualTo(3));
+        }
+
         private sealed class Browser : IHandoffBrowser
         {
-            public void Open(Uri uri) { }
+            public int Opens { get; private set; }
+            public void Open(Uri uri) => Opens++;
         }
 
         private sealed class Exchange : IHandoffHttpTransport
@@ -55,7 +82,7 @@ namespace Haiven.Sdk.Tests
                 CancellationToken cancellationToken)
             {
                 await Task.Delay(10, cancellationToken).ConfigureAwait(false);
-                return new HandoffExchangeResponse("unity-access", "Bearer", 300);
+                return new HandoffExchangeResponse("header.eyJleHAiOjF9.signature", "Bearer", 300);
             }
         }
     }

@@ -187,7 +187,18 @@ namespace Haiven.Wire
 		public static readonly ErrorCode AlreadyOnWaitlist = new("already_on_waitlist");
 		public static readonly ErrorCode InviteAlreadyRedeemed = new("invite_already_redeemed");
 		public static readonly ErrorCode EmailSendFailed = new("email_send_failed");
+		public static readonly ErrorCode SteamAppNotFound = new("steam_app_not_found");
+		public static readonly ErrorCode InvalidAppName = new("invalid_app_name");
 		public static readonly ErrorCode ClientClosedRequest = new("client_closed_request");
+		public static readonly ErrorCode SessionNotFound = new("session_not_found");
+		public static readonly ErrorCode SessionFull = new("session_full");
+		public static readonly ErrorCode SessionLocked = new("session_locked");
+		public static readonly ErrorCode KickedFromSession = new("kicked_from_session");
+		public static readonly ErrorCode AlreadyInSession = new("already_in_session");
+		public static readonly ErrorCode ConnectionNotBound = new("connection_not_bound");
+		public static readonly ErrorCode SessionUpdateRefused = new("session_update_refused");
+		public static readonly ErrorCode GameAccessRequired = new("game_access_required");
+		public static readonly ErrorCode RelayUnavailable = new("relay_unavailable");
 
 		private static readonly HashSet<string> Registered = new()
 		{
@@ -360,7 +371,18 @@ namespace Haiven.Wire
 			"already_on_waitlist",
 			"invite_already_redeemed",
 			"email_send_failed",
+			"steam_app_not_found",
+			"invalid_app_name",
 			"client_closed_request",
+			"session_not_found",
+			"session_full",
+			"session_locked",
+			"kicked_from_session",
+			"already_in_session",
+			"connection_not_bound",
+			"session_update_refused",
+			"game_access_required",
+			"relay_unavailable",
 		};
 
 		public ErrorCode(string value) => Value = value;

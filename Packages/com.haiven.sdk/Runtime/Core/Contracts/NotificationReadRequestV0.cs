@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A request to mark a notification category as read.</summary>
 	public sealed class NotificationReadRequestV0
 	{
 		/// <summary>The notification category used for grouping and read state.</summary>

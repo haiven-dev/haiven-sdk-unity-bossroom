@@ -20,6 +20,7 @@ namespace Haiven.Sdk.Contracts
 		public int Count { get; set; }
 	}
 
+	/// <summary>Frames discarded after a WebSocket session expired.</summary>
 	public sealed class WsAuthExpiredDroppedV0
 	{
 		/// <summary>The number of values represented by this object.</summary>

@@ -2,15 +2,17 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
-using Haiven.Demo.BossRoom.Lobby;
-using Haiven.Demo.BossRoom.P2P;
 using Haiven.Sdk;
 using Haiven.Sdk.Json;
+using ListedSession = Haiven.Sdk.Rest.ListedSession;
+using Roster = Haiven.Sdk.Rest.Roster;
+using Haiven.Sdk.Samples.Netcode;
 using NUnit.Framework;
 using Unity.Netcode;
 using UnityEngine;
@@ -20,9 +22,9 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
 {
     /// <summary>
     /// The lobby path against a running haiven-api with P2P sessions: two
-    /// players sign in through the game login handoff, open game sockets, and a
-    /// host's room is listed, joined and played over WebRTC with signaling and
-    /// TURN credentials from the sockets.
+    /// players sign in through the game login handoff, open game sockets, and
+    /// the SDK's P2P controller lists, creates and joins a room, which is played
+    /// over WebRTC with signaling and TURN credentials from the sockets.
     ///
     /// Needs a backend such as haiven-api's SDK demo stack with sessions turned
     /// on, named by HAIVEN_LOBBY_BASE_URL (for example http://127.0.0.1:18480/v0),
@@ -53,193 +55,164 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
         }
 
         [UnityTest]
-        public IEnumerator HostListsJoinsAndPlaysThroughTheSessionsApi()
+        public IEnumerator HostListsJoinsAndPlaysThroughTheSdkController()
         {
-            var baseUrl = Environment.GetEnvironmentVariable("HAIVEN_LOBBY_BASE_URL");
-            var appId = Environment.GetEnvironmentVariable("HAIVEN_LOBBY_APP_ID");
-            var integration = Environment.GetEnvironmentVariable("HAIVEN_LOBBY_INTEGRATION_ID");
-            if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(integration))
-                Assert.Ignore("HAIVEN_LOBBY_BASE_URL, HAIVEN_LOBBY_APP_ID and HAIVEN_LOBBY_INTEGRATION_ID are not set");
-
+            if (!Configured(out var baseUrl, out var appId, out var integration)) yield break;
             Player? host = null, guest = null;
             yield return Run(async () =>
             {
-                host = await Player.SignInAsync(baseUrl!, appId!, integration!, "lobby-test-host-" + Guid.NewGuid().ToString("N").Substring(0, 6));
-                guest = await Player.SignInAsync(baseUrl!, appId!, integration!, "lobby-test-guest-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+                host = await Player.SignInAsync(baseUrl, appId, integration, "lobby-test-host-" + Short());
+                guest = await Player.SignInAsync(baseUrl, appId, integration, "lobby-test-guest-" + Short());
             });
             disposables.Add(host!);
             disposables.Add(guest!);
-            yield return Until(() => host!.Channel.IsOpen && guest!.Channel.IsOpen, "both game sockets authenticated");
+            yield return Until(() => host!.Ready && guest!.Ready, "both game sockets authenticated", host!, guest!);
 
-            SessionAdmission? created = null, joined = null;
-            IReadOnlyList<SessionListing>? rooms = null;
-            var name = "Lobby test " + Guid.NewGuid().ToString("N").Substring(0, 6);
+            HaivenSessionAdmission? created = null, joined = null;
+            IReadOnlyList<ListedSession>? rooms = null;
+            var name = "Lobby test " + Short();
             yield return Run(async () =>
             {
-                created = await host!.Api.CreateAsync(host.Channel.ConnectionId!, name, SessionVisibility.Public, 4, false);
-                rooms = await guest!.Api.ListAsync();
+                created = await host.P2P.CreateAsync(new HaivenSessionCreateOptions(4)
+                {
+                    Metadata = new Dictionary<string, string> { ["name"] = name },
+                });
+                rooms = await guest.Sessions.ListAsync();
             });
             Assert.That(created!.RelayPolicy, Is.EqualTo("relay-only"), "a public room is always relayed");
+            Assert.That(created.HostUserId, Is.Not.Empty, "the controller read the host's id from the roster");
             var listed = rooms!.SingleOrDefault(room => room.SessionId == created.SessionId);
             Assert.That(listed, Is.Not.Null, "the guest's list shows the host's room");
-            Assert.That(listed!.Name, Is.EqualTo(name));
+            Assert.That(listed!.Metadata!["name"], Is.EqualTo(name));
             Assert.That(listed.MemberCount, Is.EqualTo(1));
 
-            var hostEvents = new List<string>();
-            host!.Channel.Event += (type, _) => hostEvents.Add(type);
-            yield return Run(async () => joined = await guest!.Api.JoinAsync(guest.Channel.ConnectionId!, created.SessionId, null));
-            Assert.That(joined!.HostUserId, Is.Not.Empty);
-            yield return Until(() => { host.Channel.Pump(); return hostEvents.Contains("session.member.joined"); },
-                "the host hears session.member.joined");
+            var hostHeardJoin = false;
+            string? left = null;
+            host.P2P.MemberJoined += _ => hostHeardJoin = true;
+            host.P2P.MemberLeft += (userId, _) => left = userId;
+            yield return Run(async () => joined = await guest.P2P.JoinAsync(created.SessionId));
+            Assert.That(joined!.HostUserId, Is.EqualTo(created.HostUserId));
+            yield return Until(() => hostHeardJoin, "the host hears session.member.joined", host, guest);
 
-            PeerConnectionOptions? hostIce = null, guestIce = null;
-            yield return Run(async () =>
-            {
-                hostIce = HaivenLobby.IceOptions(await host.Channel.RequestAsync("p2p.ice.servers", null, TimeSpan.FromSeconds(10)), out _);
-                guestIce = HaivenLobby.IceOptions(await guest!.Channel.RequestAsync("p2p.ice.servers", null, TimeSpan.FromSeconds(10)), out _);
-            });
-            Assert.That(hostIce!.Policy, Is.EqualTo(PeerIcePolicy.Relay));
-            Assert.That(hostIce.IceServers.SelectMany(server => server.Urls).Any(url => url.StartsWith("turn:")), Is.True);
+            Assert.That(host.P2P.IceOptions!.Policy, Is.EqualTo(PeerIcePolicy.Relay));
+            Assert.That(host.P2P.IceOptions.IceServers.SelectMany(server => server.Urls).Any(url => url.StartsWith("turn:")), Is.True);
 
-            var hostManager = Manager("host", new SessionPeerSignaling(host.Channel, created.SessionId, joined.HostUserId, null), null, hostIce);
-            var guestManager = Manager("guest", new SessionPeerSignaling(guest!.Channel, created.SessionId, "", joined.HostUserId),
-                joined.HostUserId, guestIce!);
+            var hostManager = Manager("host", host, joined);
+            var guestManager = Manager("guest", guest, joined);
             var hostTransport = (HaivenNetworkTransport)hostManager.NetworkConfig.NetworkTransport;
-            var reported = false;
-            hostTransport.PeerConnected += userId => host.Channel.Send("session.peer.connected",
-                new Dictionary<string, object?> { ["sessionId"] = created.SessionId, ["userId"] = userId },
-                reply => reported = reply.Success == true);
 
             Assert.That(hostManager.StartHost(), Is.True);
             Assert.That(guestManager.StartClient(), Is.True);
             yield return Until(() => guestManager.IsConnectedClient && hostManager.ConnectedClientsIds.Count == 2,
-                "NGO connected over WebRTC with signaling through haiven-api");
-            yield return Until(() => { host.Channel.Pump(); return reported; }, "haiven-api accepted session.peer.connected");
-            yield return Until(() => hostTransport.GetPathType(1) != null, "the path type is measured");
+                "NGO connected over WebRTC with signaling through haiven-api", host, guest);
+            yield return Until(() => hostTransport.GetPathType(1) != null, "the path type is measured", host, guest);
             Assert.That(hostTransport.GetPathType(1), Is.EqualTo("relay"));
+            var guestUserId = hostTransport.GetUserId(1);
 
-            // The guest leaves through the API; the host is told and drops it.
-            yield return Run(() => guest.Api.LeaveAsync(created.SessionId));
-            yield return Until(() =>
-            {
-                host.Channel.Pump();
-                if (hostEvents.Contains("session.member.left") && hostTransport.GetUserId(1) != null)
-                    hostTransport.DropUser(hostTransport.GetUserId(1)!);
-                return hostManager.ConnectedClientsIds.Count == 1;
-            }, "the host dropped the guest after session.member.left");
+            // The guest leaves; session.member.left makes the host's controller drop it.
+            yield return Run(() => guest.P2P.LeaveAsync());
+            yield return Until(() => hostManager.ConnectedClientsIds.Count == 1,
+                "the host dropped the guest after session.member.left", host, guest);
+            Assert.That(left, Is.EqualTo(guestUserId));
 
             // The host leaving closes the room.
-            yield return Run(() => host.Api.LeaveAsync(created.SessionId));
-            IReadOnlyList<SessionListing>? after = null;
-            yield return Run(async () => after = await guest.Api.ListAsync());
+            yield return Run(() => host.P2P.LeaveAsync());
+            IReadOnlyList<ListedSession>? after = null;
+            yield return Run(async () => after = await guest.Sessions.ListAsync());
             Assert.That(after!.Any(room => room.SessionId == created.SessionId), Is.False, "the closed room is no longer listed");
         }
 
         /// <summary>
         /// A guest whose game socket drops resumes on a new one within the 30-second
-        /// window: the participation moves to the new connection and stays on the
-        /// roster. A resume with the wrong proof is refused.
+        /// window: the controller moves the participation to the new connection
+        /// and it stays on the roster.
         /// </summary>
         [UnityTest]
         public IEnumerator AGuestResumesOnANewSocketWithinTheWindow()
         {
             if (!Configured(out var baseUrl, out var appId, out var integration)) yield break;
             Player? host = null, guest = null;
-            SessionAdmission? created = null, joined = null;
+            HaivenSessionAdmission? created = null, joined = null;
             yield return Run(async () =>
             {
                 host = await Player.SignInAsync(baseUrl, appId, integration, "lobby-resume-host-" + Short());
                 guest = await Player.SignInAsync(baseUrl, appId, integration, "lobby-resume-guest-" + Short());
             });
             disposables.Add(host!);
-            yield return Until(() => host!.Channel.IsOpen && guest!.Channel.IsOpen, "both game sockets authenticated");
+            disposables.Add(guest!);
+            yield return Until(() => host!.Ready && guest!.Ready, "both game sockets authenticated", host!, guest!);
             yield return Run(async () =>
             {
-                created = await host!.Api.CreateAsync(host.Channel.ConnectionId!, "Resume test", SessionVisibility.Public, 4, false);
-                joined = await guest!.Api.JoinAsync(guest.Channel.ConnectionId!, created.SessionId, null);
+                created = await host.P2P.CreateAsync(new HaivenSessionCreateOptions(4));
+                joined = await guest.P2P.JoinAsync(created.SessionId);
             });
-            Assert.That(joined!.ResumeToken, Has.Length.EqualTo(43));
-            Assert.That(joined.ConnectionId, Is.EqualTo(guest!.Channel.ConnectionId));
+            var before = joined!.ConnectionId;
+            var resumed = false;
+            guest.P2P.Resumed += () => resumed = true;
 
             // The socket drops; the same signed-in player opens another.
-            Player? again = null;
-            yield return Run(async () => again = await guest.ReconnectAsync());
-            disposables.Add(again!);
-            yield return Until(() => again!.Channel.IsOpen, "the new game socket authenticated");
-            Assert.That(again!.Channel.ConnectionId, Is.Not.EqualTo(joined.ConnectionId));
+            yield return Run(() => guest.ReconnectAsync());
+            yield return Until(() => resumed, "the participation resumed on the new socket", host, guest);
+            Assert.That(guest.P2P.State, Is.EqualTo(HaivenP2PState.InSession));
+            Assert.That(joined.ConnectionId, Is.EqualTo(guest.P2P.Channel!.ConnectionId));
+            Assert.That(joined.ConnectionId, Is.Not.EqualTo(before));
 
-            ServerFrame? wrong = null, resumed = null;
-            yield return Run(async () =>
-            {
-                wrong = await again.Channel.RequestAsync("session.resume", Resume(joined, "A" + joined.ResumeToken.Substring(1)), TimeSpan.FromSeconds(10));
-                resumed = await again.Channel.RequestAsync("session.resume", Resume(joined, joined.ResumeToken), TimeSpan.FromSeconds(10));
-            });
-            Assert.That(wrong!.Success, Is.False);
-            Assert.That(wrong.Error, Is.EqualTo("session_not_found"), "a wrong proof gets the same refusal as a missing session");
-            Assert.That(resumed!.Success, Is.True, resumed.Error);
-            Assert.That(SessionsApi.Text(resumed.Payload!, "connectionId"), Is.EqualTo(again.Channel.ConnectionId));
-
-            SessionAdmission? roster = null;
-            yield return Run(async () => roster = await host!.Api.RosterAsync(created!.SessionId));
+            Roster? roster = null;
+            yield return Run(async () => roster = await host.Sessions.RosterAsync(created!.SessionId));
             Assert.That(roster!.Members, Has.Count.EqualTo(2), "the guest is still in the room");
-            yield return Run(() => host!.Api.LeaveAsync(created!.SessionId));
+            yield return Run(() => host.P2P.LeaveAsync());
         }
 
         /// <summary>
-        /// After the window the server ends the participation itself
-        /// (connection_lost): a late resume is refused, and the roster the host
-        /// reads no longer lists the guest, so the host drops it.
+        /// A guest whose socket stays gone loses the room when the window ends,
+        /// and the server ends its participation too (connection_lost): the host
+        /// drops it, from session.member.left or from its next roster read.
         /// </summary>
         [UnityTest, Timeout(120000)]
-        public IEnumerator AResumeAfterTheWindowIsRefusedAndTheRosterDropsTheGuest()
+        public IEnumerator AGuestWithoutASocketLosesTheRoomAndTheHostDropsIt()
         {
             if (!Configured(out var baseUrl, out var appId, out var integration)) yield break;
             Player? host = null, guest = null;
-            SessionAdmission? created = null, joined = null;
+            HaivenSessionAdmission? created = null;
             yield return Run(async () =>
             {
                 host = await Player.SignInAsync(baseUrl, appId, integration, "lobby-late-host-" + Short());
                 guest = await Player.SignInAsync(baseUrl, appId, integration, "lobby-late-guest-" + Short());
             });
             disposables.Add(host!);
-            yield return Until(() => host!.Channel.IsOpen && guest!.Channel.IsOpen, "both game sockets authenticated");
+            disposables.Add(guest!);
+            yield return Until(() => host!.Ready && guest!.Ready, "both game sockets authenticated", host!, guest!);
+            Roster? roster = null;
             yield return Run(async () =>
             {
-                created = await host!.Api.CreateAsync(host.Channel.ConnectionId!, "Late resume test", SessionVisibility.Public, 4, false);
-                joined = await guest!.Api.JoinAsync(guest.Channel.ConnectionId!, created.SessionId, null);
+                created = await host.P2P.CreateAsync(new HaivenSessionCreateOptions(4));
+                await guest.P2P.JoinAsync(created.SessionId);
+                roster = await host.Sessions.RosterAsync(created.SessionId);
             });
-            guest!.Dispose();
+            var guestUserId = roster!.Members!.Select(member => member.UserId).Single(id => id != created!.HostUserId)!;
+            var peers = new ConnectedPeers(guestUserId);
+            host.P2P.Peers = peers;
+            HaivenP2PEndReason? ended = null;
+            guest.P2P.Ended += (reason, _) => ended = reason;
 
-            // 30 seconds of window and up to one 10-second tick of the liveness worker.
+            // The socket drops and the player never opens another.
+            guest.DropSocket();
+            yield return Until(() => guest.P2P.State == HaivenP2PState.Resuming, "the guest noticed the drop", host, guest);
+            // 30 seconds of window and up to one 10-second tick of the server's liveness worker.
             var waitUntil = Time.realtimeSinceStartup + 45f;
-            while (Time.realtimeSinceStartup < waitUntil) yield return null;
-
-            Player? again = null;
-            ServerFrame? late = null;
-            SessionAdmission? roster = null;
-            yield return Run(async () =>
+            while (Time.realtimeSinceStartup < waitUntil)
             {
-                again = await Player.ConnectAsync(baseUrl, appId, guest.Token);
-                roster = await host!.Api.RosterAsync(created!.SessionId);
-            });
-            disposables.Add(again!);
-            yield return Until(() => again!.Channel.IsOpen, "the new game socket authenticated");
-            yield return Run(async () => late = await again!.Channel.RequestAsync("session.resume", Resume(joined!, joined!.ResumeToken), TimeSpan.FromSeconds(10)));
-            Assert.That(late!.Success, Is.False);
-            Assert.That(late.Error, Is.EqualTo("session_not_found"));
+                host.P2P.Tick();
+                guest.P2P.Tick();
+                yield return null;
+            }
+
+            Assert.That(ended, Is.EqualTo(HaivenP2PEndReason.ResumeWindowElapsed));
+            Assert.That(peers.Dropped, Is.EqualTo(new[] { guestUserId }), "the host dropped the guest");
+            yield return Run(async () => roster = await host.Sessions.RosterAsync(created!.SessionId));
             Assert.That(roster!.Members, Has.Count.EqualTo(1), "the server ended the guest's participation");
-            Assert.That(HaivenLobby.NotOnRoster(new[] { joined.HostUserId, "guest-on-the-host" }, roster.Members),
-                Is.EqualTo(new[] { "guest-on-the-host" }));
-            yield return Run(() => host!.Api.LeaveAsync(created!.SessionId));
+            yield return Run(() => host.P2P.LeaveAsync());
         }
-
-        private static Dictionary<string, object?> Resume(SessionAdmission admission, string token) =>
-            new Dictionary<string, object?>
-            {
-                ["participationId"] = admission.ParticipationId,
-                ["previousConnectionId"] = admission.ConnectionId,
-                ["resumeToken"] = token,
-            };
 
         private static bool Configured(out string baseUrl, out string appId, out string integration)
         {
@@ -253,14 +226,18 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
 
         private static string Short() => Guid.NewGuid().ToString("N").Substring(0, 6);
 
-        private NetworkManager Manager(string name, SessionPeerSignaling signaling, string? hostUserId, PeerConnectionOptions ice)
+        // The lobby's wiring, as HaivenLobby.Install does it.
+        private NetworkManager Manager(string name, Player player, HaivenSessionAdmission joined)
         {
             var created = new GameObject("lobby " + name);
             objects.Add(created);
+            var session = player.P2P;
             var transport = created.AddComponent<HaivenNetworkTransport>();
-            transport.Signaling = signaling;
-            transport.HostUserId = hostUserId;
-            transport.Connection = ice;
+            transport.Signaling = session.Signaling;
+            transport.HostUserId = session.Room!.Hosting ? null : joined.HostUserId;
+            transport.Connection = session.IceOptions!;
+            transport.PeerConnected += session.ReportPeerConnected;
+            session.Peers = transport;
             var manager = created.AddComponent<NetworkManager>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = transport, EnableSceneManagement = false };
             return manager;
@@ -282,66 +259,96 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
             }
         }
 
-        private static IEnumerator Until(Func<bool> condition, string what)
+        // Each frame ticks the players' controllers, as HaivenLobby.Update does.
+        private static IEnumerator Until(Func<bool> condition, string what, params Player[] players)
         {
             var deadline = Time.realtimeSinceStartup + Timeout;
-            while (!condition())
+            while (true)
             {
+                foreach (var player in players) player.P2P.Tick();
+                if (condition()) yield break;
                 if (Time.realtimeSinceStartup > deadline) Assert.Fail("timed out: " + what);
                 yield return null;
             }
         }
 
-        /// <summary>One signed-in player: a game credential, its game socket and the sessions API.</summary>
+        /// <summary>A host's peers for the roster check, without a transport.</summary>
+        private sealed class ConnectedPeers : IHaivenPeerRoster
+        {
+            private readonly List<string> connected;
+
+            public ConnectedPeers(params string[] users) => connected = users.ToList();
+
+            public List<string> Dropped { get; } = new List<string>();
+
+            public IEnumerable<string> ConnectedUsers() => connected.ToList();
+
+            public bool DropUser(string userId)
+            {
+                if (!connected.Remove(userId)) return false;
+                Dropped.Add(userId);
+                return true;
+            }
+        }
+
+        /// <summary>One signed-in player: a game credential, its game socket and the SDK's P2P controller.</summary>
         private sealed class Player : IDisposable
         {
-            private readonly SystemNetSocket socket;
-            private readonly HaivenSessionCore session;
+            private readonly string baseUrl;
+            private readonly string token;
             private readonly BearerRestTransport rest;
+            private SystemNetSocket? socket;
+            private HaivenSessionCore? session;
             private bool disposed;
 
-            private readonly string baseUrl;
-            private readonly string appId;
-
-            private Player(string baseUrl, string appId, string token, SystemNetSocket socket, HaivenSessionCore session,
-                SessionChannel channel, BearerRestTransport rest, SessionsApi api)
+            private Player(string baseUrl, string appId, string token)
             {
                 this.baseUrl = baseUrl;
-                this.appId = appId;
-                Token = token;
-                this.socket = socket;
-                this.session = session;
-                this.rest = rest;
-                Channel = channel;
-                Api = api;
+                this.token = token;
+                rest = new BearerRestTransport(baseUrl, appId, () => token);
+                Sessions = new HaivenSessionsClient(rest, long.Parse(appId, CultureInfo.InvariantCulture));
+                P2P = new HaivenP2PSession(Sessions, () => Time.realtimeSinceStartupAsDouble);
             }
 
-            public SessionChannel Channel { get; }
+            public HaivenSessionsClient Sessions { get; }
 
-            public SessionsApi Api { get; }
+            public HaivenP2PSession P2P { get; }
 
-            public string Token { get; }
+            public bool Ready => P2P.Channel?.IsOpen == true;
 
-            public static async Task<Player> SignInAsync(string baseUrl, string appId, string integration, string subject) =>
-                await ConnectAsync(baseUrl, appId, await HandoffAsync(baseUrl, integration, subject));
+            public static async Task<Player> SignInAsync(string baseUrl, string appId, string integration, string subject)
+            {
+                var player = new Player(baseUrl, appId, await HandoffAsync(baseUrl, integration, subject));
+                await player.OpenSocketAsync();
+                return player;
+            }
 
             /// <summary>Drops this socket and opens another for the same signed-in player.</summary>
-            public async Task<Player> ReconnectAsync()
+            public Task ReconnectAsync()
             {
-                Dispose();
-                return await ConnectAsync(baseUrl, appId, Token);
+                CloseSocket();
+                return OpenSocketAsync();
             }
 
-            public static async Task<Player> ConnectAsync(string baseUrl, string appId, string token)
+            /// <summary>Closes the socket as a dropped network would; the controller sees it close.</summary>
+            public void DropSocket() => session?.Close();
+
+            public void CloseSocket()
             {
-                var rest = new BearerRestTransport(baseUrl, appId, () => token);
-                var socket = new SystemNetSocket();
-                var session = new HaivenSessionCore(socket, () => token);
-                var channel = new SessionChannel(session);
+                session?.Dispose();
+                socket?.Dispose();
+                session = null;
+                socket = null;
+            }
+
+            private async Task OpenSocketAsync()
+            {
+                socket = new SystemNetSocket();
+                session = new HaivenSessionCore(socket, () => token);
+                P2P.Attach(session);
                 var realtime = new Uri(baseUrl.Replace("http://", "ws://").Replace("https://", "wss://").TrimEnd('/') + "/ws");
                 await socket.ConnectAsync(realtime);
                 session.Opened();
-                return new Player(baseUrl, appId, token, socket, session, channel, rest, new SessionsApi(rest, appId));
             }
 
             // The SDK's game login handoff by hand: PKCE S256 through the stack's
@@ -379,7 +386,7 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
                     }));
                 var body = await exchange.Content.ReadAsStringAsync();
                 if (!exchange.IsSuccessStatusCode) throw new InvalidOperationException("handoff exchange: " + (int)exchange.StatusCode + " " + body);
-                return SessionsApi.Text(HaivenJson.Parse(body), "access_token");
+                return HaivenJson.Parse(body).TryGetProperty("access_token", out var accessToken) ? accessToken.GetString() : "";
             }
 
             private static byte[] RandomBytes(int count)
@@ -396,9 +403,8 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
             {
                 if (disposed) return;
                 disposed = true;
-                Channel.Dispose();
-                session.Dispose();
-                socket.Dispose();
+                P2P.Dispose();
+                CloseSocket();
                 rest.Dispose();
             }
         }

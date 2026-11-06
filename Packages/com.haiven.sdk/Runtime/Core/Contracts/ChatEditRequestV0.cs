@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A request to replace a chat message's content.</summary>
 	public sealed class ChatEditRequestV0
 	{
 		/// <summary>The chat message identifier.</summary>

@@ -3,10 +3,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Haiven.Demo.BossRoom.Lobby;
-using Haiven.Demo.BossRoom.P2P;
 using Haiven.Sdk;
 using Haiven.Sdk.Json;
+using Haiven.Sdk.Samples.Netcode;
 using NUnit.Framework;
 using Unity.Netcode;
 using UnityEngine;
@@ -19,7 +18,7 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
     /// each socket, answers <c>p2p.signal</c> with success, and relays it to the
     /// recipient as <c>p2p.signal.received</c> with the sender's id set by the
     /// server; <c>p2p.signal.ack</c> goes back the same way. Deliveries can be
-    /// dropped or doubled to exercise retries and duplicates.
+    /// doubled to exercise duplicates.
     /// </summary>
     internal sealed class FakeSignalingServer
     {
@@ -27,19 +26,16 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
 
         public string SessionId { get; } = Guid.NewGuid().ToString("D");
 
-        /// <summary>Signal deliveries still to drop, counted down.</summary>
-        public int DropSignals { get; set; }
-
         public bool DoubleSignals { get; set; }
 
         public List<string> Log { get; } = new List<string>();
 
-        public (HaivenSessionCore Session, SessionChannel Channel) Connect(string userId)
+        public (HaivenSessionCore Session, HaivenSessionChannel Channel) Connect(string userId)
         {
             var socket = new FakeSocket(this, userId);
             sockets[userId] = socket;
             var session = new HaivenSessionCore(socket, () => "token-" + userId);
-            var channel = new SessionChannel(session);
+            var channel = new HaivenSessionChannel(session);
             session.Opened();
             return (session, channel);
         }
@@ -47,8 +43,8 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
         public void Receive(string from, string json)
         {
             var frame = HaivenJson.Parse(json);
-            var type = SessionsApi.Text(frame, "type");
-            var requestId = SessionsApi.Text(frame, "requestId");
+            var type = Text(frame, "type");
+            var requestId = Text(frame, "requestId");
             frame.TryGetProperty("payload", out var payload);
             switch (type)
             {
@@ -58,34 +54,28 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
                     break;
                 case "p2p.signal":
                     sockets[from].Deliver("{\"type\":\"p2p.signal\",\"requestId\":\"" + requestId + "\",\"success\":true}");
-                    var to = SessionsApi.Text(payload, "toUserId");
-                    var seq = SessionsApi.Number(payload, "seq");
+                    var to = Text(payload, "toUserId");
+                    var seq = Number(payload, "seq");
                     Log.Add($"signal {from}->{to} #{seq}");
-                    if (DropSignals > 0)
-                    {
-                        DropSignals--;
-                        Log.Add($"dropped #{seq}");
-                        break;
-                    }
                     var received = Event("p2p.signal.received", new Dictionary<string, object?>
                     {
-                        ["sessionId"] = SessionsApi.Text(payload, "sessionId"),
+                        ["sessionId"] = Text(payload, "sessionId"),
                         ["fromUserId"] = from,
-                        ["attemptId"] = SessionsApi.Text(payload, "attemptId"),
+                        ["attemptId"] = Text(payload, "attemptId"),
                         ["seq"] = seq,
-                        ["data"] = SessionsApi.Text(payload, "data"),
+                        ["data"] = Text(payload, "data"),
                     });
                     sockets[to].Deliver(received);
                     if (DoubleSignals) sockets[to].Deliver(received);
                     break;
                 case "p2p.signal.ack":
                     sockets[from].Deliver("{\"type\":\"p2p.signal.ack\",\"requestId\":\"" + requestId + "\",\"success\":true}");
-                    sockets[SessionsApi.Text(payload, "toUserId")].Deliver(Event("p2p.signal.ack", new Dictionary<string, object?>
+                    sockets[Text(payload, "toUserId")].Deliver(Event("p2p.signal.ack", new Dictionary<string, object?>
                     {
-                        ["sessionId"] = SessionsApi.Text(payload, "sessionId"),
+                        ["sessionId"] = Text(payload, "sessionId"),
                         ["fromUserId"] = from,
-                        ["attemptId"] = SessionsApi.Text(payload, "attemptId"),
-                        ["seq"] = SessionsApi.Number(payload, "seq"),
+                        ["attemptId"] = Text(payload, "attemptId"),
+                        ["seq"] = Number(payload, "seq"),
                     }));
                     break;
                 default:
@@ -93,6 +83,16 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
                     break;
             }
         }
+
+        private static string Text(IHaivenJsonNode? node, string name) =>
+            node != null && node.TryGetProperty(name, out var value) && value.Kind == HaivenJsonKind.String
+                ? value.GetString()
+                : "";
+
+        private static long Number(IHaivenJsonNode? node, string name) =>
+            node != null && node.TryGetProperty(name, out var value) && value.Kind == HaivenJsonKind.Number
+                ? long.Parse(value.GetNumberText(), System.Globalization.CultureInfo.InvariantCulture)
+                : 0;
 
         private static string Event(string type, Dictionary<string, object?> payload) =>
             HaivenJson.Serialize(new Dictionary<string, object?> { ["type"] = type, ["payload"] = payload });
@@ -120,6 +120,11 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
         }
     }
 
+    /// <summary>
+    /// The lobby's transport over the SDK's session signaling. The signaling
+    /// rules themselves (acknowledgement, retries, duplicates, order, epochs)
+    /// are proven by the SDK's gaming-p2p-client/v0 conformance suite.
+    /// </summary>
     public sealed class LobbySignalingTests
     {
         private const string Host = "host-user";
@@ -137,126 +142,6 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
                 UnityEngine.Object.Destroy(created);
             }
             objects.Clear();
-        }
-
-        [Test]
-        public void SignalsArriveOnceAndInOrderDespiteLossAndDuplicates()
-        {
-            var server = new FakeSignalingServer { DoubleSignals = true };
-            var now = 0f;
-            var (hostSocket, hostChannel) = server.Connect(Host);
-            var (guestSocket, guestChannel) = server.Connect(Guest);
-            Assert.That(hostChannel.ConnectionId, Is.EqualTo("conn-" + Host));
-            var host = new SessionPeerSignaling(hostChannel, server.SessionId, Host, null, () => now);
-            var guest = new SessionPeerSignaling(guestChannel, server.SessionId, Guest, Host, () => now);
-            host.Start(asHost: true);
-            guest.Start(asHost: false);
-            var arrived = new List<string>();
-            host.Received += (from, signal) => arrived.Add(from + ":" + signal.Kind + ":" + (signal.Sdp ?? signal.Candidate!.Candidate));
-
-            // The second message is lost once; the first and third arrive twice.
-            guest.Send(Host, PeerSignal.Offer("offer-sdp"));
-            server.DropSignals = 1;
-            guest.Send(Host, PeerSignal.ForCandidate(new PeerIceCandidate("candidate-1", "0", 0)));
-            guest.Send(Host, PeerSignal.ForCandidate(new PeerIceCandidate("candidate-2", "0", 0)));
-            host.Poll();
-            guest.Poll();
-
-            // Candidate 2 waits for candidate 1, which only a retry brings.
-            Assert.That(arrived, Is.EqualTo(new[] { Guest + ":Offer:offer-sdp" }));
-            Assert.That(guest.PendingAcknowledgements, Is.EqualTo(1), "only the lost message is unacknowledged");
-
-            now = 1.1f;
-            guest.Poll();
-            host.Poll();
-            guest.Poll();
-            Assert.That(arrived, Is.EqualTo(new[]
-            {
-                Guest + ":Offer:offer-sdp", Guest + ":Candidate:candidate-1", Guest + ":Candidate:candidate-2",
-            }));
-            Assert.That(guest.PendingAcknowledgements, Is.Zero);
-
-            hostSocket.Dispose();
-            guestSocket.Dispose();
-        }
-
-        [Test]
-        public void ANewOfferStartsANewAttemptAndTheOldOneIsIgnored()
-        {
-            var server = new FakeSignalingServer();
-            var (_, hostChannel) = server.Connect(Host);
-            var (_, guestChannel) = server.Connect(Guest);
-            var host = new SessionPeerSignaling(hostChannel, server.SessionId, Host, null, () => 0f);
-            var guest = new SessionPeerSignaling(guestChannel, server.SessionId, Guest, Host, () => 0f);
-            host.Start(asHost: true);
-            guest.Start(asHost: false);
-            var atGuest = new List<string>();
-            guest.Received += (_, signal) => atGuest.Add(signal.Kind + ":" + signal.Sdp);
-            host.Received += (from, signal) =>
-            {
-                if (signal.Kind == PeerSignalKind.Offer) host.Send(from, PeerSignal.Answer("answer-to-" + signal.Sdp));
-            };
-
-            guest.Send(Host, PeerSignal.Offer("first"));
-            host.Poll();
-            guest.Poll();
-            guest.Send(Host, PeerSignal.Offer("second"));
-            host.Poll();
-            guest.Poll();
-
-            Assert.That(atGuest, Is.EqualTo(new[] { "Answer:answer-to-first", "Answer:answer-to-second" }));
-            var attempts = server.Log.Count(line => line.StartsWith("signal " + Guest));
-            Assert.That(attempts, Is.EqualTo(2));
-        }
-
-        [Test]
-        public void AMessageLostWithTheOldSocketGoesOutOnTheResumedOne()
-        {
-            var server = new FakeSignalingServer();
-            var now = 0f;
-            var (_, hostChannel) = server.Connect(Host);
-            var (_, guestChannel) = server.Connect(Guest);
-            var host = new SessionPeerSignaling(hostChannel, server.SessionId, Host, null, () => now);
-            var guest = new SessionPeerSignaling(guestChannel, server.SessionId, Guest, Host, () => now);
-            host.Start(asHost: true);
-            guest.Start(asHost: false);
-            var arrived = new List<string>();
-            host.Received += (_, signal) => arrived.Add(signal.Kind + ":" + signal.Sdp);
-
-            // The guest's socket drops with its offer: the server never relays it.
-            server.DropSignals = 1;
-            guest.Send(Host, PeerSignal.Offer("offer-sdp"));
-            host.Poll();
-            Assert.That(arrived, Is.Empty);
-
-            // The demo opens a new socket and the session resumes on it.
-            var (_, resumedChannel) = server.Connect(Guest);
-            guest.Rebind(resumedChannel);
-            guest.Poll();
-            host.Poll();
-            guest.Poll();
-            Assert.That(arrived, Is.EqualTo(new[] { "Offer:offer-sdp" }), "the unacknowledged offer went out again at once");
-            Assert.That(guest.PendingAcknowledgements, Is.Zero, "the acknowledgement reached the resumed socket");
-        }
-
-        [Test]
-        public void TheHostDropsPeersTheRosterNoLongerLists()
-        {
-            Assert.That(HaivenLobby.NotOnRoster(new[] { "a", "b", "c" }, new[] { "host", "a", "c" }), Is.EqualTo(new[] { "b" }));
-            Assert.That(HaivenLobby.NotOnRoster(new[] { "a" }, new[] { "a" }), Is.Empty);
-        }
-
-        [Test]
-        public void SignalDataRoundTripsEveryKind()
-        {
-            var candidate = PeerSignal.ForCandidate(new PeerIceCandidate("candidate:1 1 udp 1 10.0.0.1 9 typ host", "0", 0));
-            var decoded = SessionPeerSignaling.Decode(SessionPeerSignaling.Encode(candidate))!;
-            Assert.That(decoded.Kind, Is.EqualTo(PeerSignalKind.Candidate));
-            Assert.That(decoded.Candidate!.Candidate, Is.EqualTo(candidate.Candidate!.Candidate));
-            Assert.That(decoded.Candidate.SdpMid, Is.EqualTo("0"));
-            Assert.That(decoded.Candidate.SdpMLineIndex, Is.EqualTo(0));
-            var offer = SessionPeerSignaling.Decode(SessionPeerSignaling.Encode(PeerSignal.Offer("v=0\r\na=x\r\n")))!;
-            Assert.That(offer.Sdp, Is.EqualTo("v=0\r\na=x\r\n"));
         }
 
         [Test]
@@ -278,8 +163,9 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
             var server = new FakeSignalingServer { DoubleSignals = true };
             var (_, hostChannel) = server.Connect(Host);
             var (_, guestChannel) = server.Connect(Guest);
-            var hostManager = Manager("host", new SessionPeerSignaling(hostChannel, server.SessionId, Host, null), null);
-            var guestManager = Manager("guest", new SessionPeerSignaling(guestChannel, server.SessionId, Guest, Host), Host);
+            var hostManager = Manager("host", new HaivenSessionSignaling(hostChannel, server.SessionId, Host, null), null);
+            var guestManager = Manager("guest",
+                new HaivenSessionSignaling(guestChannel, server.SessionId, Guest, Host, participationId: "participation-guest"), Host);
             var hostTransport = (HaivenNetworkTransport)hostManager.NetworkConfig.NetworkTransport;
             string? connected = null;
             hostTransport.PeerConnected += user => connected = user;
@@ -305,7 +191,7 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
             }
         }
 
-        private NetworkManager Manager(string name, SessionPeerSignaling signaling, string? hostUserId)
+        private NetworkManager Manager(string name, HaivenSessionSignaling signaling, string? hostUserId)
         {
             var created = new GameObject(name);
             objects.Add(created);

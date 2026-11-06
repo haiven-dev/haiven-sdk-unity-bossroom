@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload a client sends on a chat.edit frame, replacing the text of a message it authored.</summary>
 	public sealed class WsChatEditRequestV0
 	{
 		/// <summary>The message to edit.</summary>

@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -144,6 +145,82 @@ namespace Haiven.Sdk
     }
 
     /// <summary>
+    /// A reward the player asked for before linking a Haiven account. Local
+    /// state only: it is not a recorded claim, and it is not loot.
+    /// </summary>
+    public sealed class SavedRewardClaim
+    {
+        internal SavedRewardClaim(string claimId, string integrationId, string rewardRef)
+        {
+            ClaimId = claimId;
+            IntegrationId = integrationId;
+            RewardRef = rewardRef;
+        }
+
+        public string ClaimId { get; }
+        public string IntegrationId { get; }
+        public string RewardRef { get; }
+    }
+
+    /// <summary>The JSON document of saved claim intents. The SDK does not choose where it lives.</summary>
+    public interface IRewardClaimIntentStore
+    {
+        /// <summary>The last saved document, or empty when nothing has been saved.</summary>
+        string Load();
+
+        /// <summary>Replaces the document. The text is the JSON array from <see cref="RewardClaims"/>.</summary>
+        void Save(string document);
+    }
+
+    /// <summary>An in-memory intent document, for tests and for a process that does not outlive the intent.</summary>
+    public sealed class MemoryRewardClaimIntentStore : IRewardClaimIntentStore
+    {
+        public string Document { get; private set; } = "";
+
+        public string Load() => Document;
+
+        public void Save(string document) => Document = document ?? "";
+    }
+
+    /// <summary>
+    /// A file of saved claim intents. Claim ids are not credentials. A missing
+    /// or unreadable file loads as no intents; the next save replaces it.
+    /// </summary>
+    public sealed class FileRewardClaimIntentStore : IRewardClaimIntentStore
+    {
+        private readonly string path;
+
+        public FileRewardClaimIntentStore(string path)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("A path is required.", nameof(path));
+            this.path = path;
+        }
+
+        public string Load()
+        {
+            try
+            {
+                return File.Exists(path) ? File.ReadAllText(path) : "";
+            }
+            catch (IOException)
+            {
+                return "";
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return "";
+            }
+        }
+
+        public void Save(string document)
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+            File.WriteAllText(path, document ?? "");
+        }
+    }
+
+    /// <summary>
     /// Subscriber-reward claims (HAVN-1179) over the generated <see cref="RestApi"/>.
     ///
     /// A player claims a reward with <c>POST /users/me/rewards/claims</c> under a
@@ -153,6 +230,13 @@ namespace Haiven.Sdk
     /// the id of every claim that has not had a final answer, keyed by
     /// integration and reward, and hands it to the next attempt; a final answer
     /// (recorded, or refused) releases it.
+    ///
+    /// <see cref="Save"/> records that id before the player links and does not
+    /// post it. An <see cref="IRewardClaimIntentStore"/> keeps it across launches.
+    /// After the login handoff, <see cref="SubmitSavedAsync"/> posts each saved
+    /// id on the same user claim route. Loot is granted only when the result is
+    /// <see cref="RewardClaimResult.Claimed"/>. <see cref="Clear"/> drops in-flight
+    /// ids and leaves saved intents, so the next link submits the same claim id.
     ///
     /// Refusals are classified from <see cref="HaivenRestException"/>, which the
     /// transport should throw for a non-2xx response; any other exception is a
@@ -165,21 +249,35 @@ namespace Haiven.Sdk
     {
         private readonly RestApi api;
         private readonly Func<string> newClaimId;
+        private readonly IRewardClaimIntentStore? savedStore;
         private readonly Dictionary<(string IntegrationId, string RewardRef), string> pending =
             new Dictionary<(string, string), string>();
+        private readonly Dictionary<(string IntegrationId, string RewardRef), string> saved =
+            new Dictionary<(string, string), string>();
+        private readonly List<(string IntegrationId, string RewardRef)> savedOrder =
+            new List<(string, string)>();
         private readonly object gate = new object();
         private long sessionGeneration;
 
         /// <param name="api">A REST API whose transport sends the player's bearer token.</param>
         /// <param name="newClaimId">Mints claim ids; defaults to <see cref="NewUuidV7"/>.</param>
-        public RewardClaims(RestApi api, Func<string>? newClaimId = null)
+        /// <param name="savedClaims">Where pre-link intents survive a restart. Omitted, they last for this process.</param>
+        public RewardClaims(RestApi api, Func<string>? newClaimId = null, IRewardClaimIntentStore? savedClaims = null)
         {
             this.api = api ?? throw new ArgumentNullException(nameof(api));
             this.newClaimId = newClaimId ?? NewUuidV7;
+            savedStore = savedClaims;
+            LoadSaved();
         }
 
-        /// <summary>Raised, on the completing thread, for every recorded claim.</summary>
+        /// <summary>Raised, on the completing thread, for every recorded claim. This is the loot signal.</summary>
         public event Action<RewardClaimOutcome>? Claimed;
+
+        /// <summary>
+        /// Raised for every submitted claim that still belongs to this player, including a refusal.
+        /// A refusal is not loot.
+        /// </summary>
+        public event Action<RewardClaimOutcome>? ClaimSettled;
 
         /// <summary>Whether the signed-in account may receive subscriber rewards.</summary>
         public Task<RewardEligibilityResponse?> GetEligibilityAsync(CancellationToken cancellationToken = default) =>
@@ -206,7 +304,7 @@ namespace Haiven.Sdk
                 requestSessionGeneration = sessionGeneration;
                 if (!pending.TryGetValue(key, out claimId!))
                 {
-                    claimId = newClaimId();
+                    if (!saved.TryGetValue(key, out claimId!)) claimId = MintClaimId();
                     pending[key] = claimId;
                 }
             }
@@ -220,6 +318,16 @@ namespace Haiven.Sdk
                     throw new OperationCanceledException("The reward claim was invalidated because the player signed out.");
                 // Only the attempt that owns the id releases it.
                 if (!outcome.IsRetryable && pending.TryGetValue(key, out var current) && current == claimId) pending.Remove(key);
+                if (!outcome.IsRetryable) ReleaseSaved(key, claimId);
+                if (ClaimSettled is not null)
+                {
+                    foreach (Action<RewardClaimOutcome> handler in ClaimSettled.GetInvocationList())
+                    {
+                        handler(outcome);
+                        if (requestSessionGeneration != sessionGeneration)
+                            throw new OperationCanceledException("The reward claim was invalidated because the player signed out.");
+                    }
+                }
                 if (outcome.Succeeded && Claimed is not null)
                 {
                     // Keep Clear mutually exclusive with delivery, but check after
@@ -243,9 +351,77 @@ namespace Haiven.Sdk
         }
 
         /// <summary>
+        /// Records a claim intent before the player links. Reuses the claim id
+        /// already saved or pending for this reward. Does not post, and does not
+        /// raise <see cref="Claimed"/>.
+        /// </summary>
+        public SavedRewardClaim Save(string integrationId, string rewardRef)
+        {
+            if (string.IsNullOrEmpty(integrationId)) throw new ArgumentException("An integration id is required.", nameof(integrationId));
+            if (string.IsNullOrEmpty(rewardRef) || UnicodeCodePointCount(rewardRef) > 128)
+                throw new ArgumentException("A reward ref must be 1 to 128 characters.", nameof(rewardRef));
+            var key = (integrationId, rewardRef);
+            lock (gate)
+            {
+                if (!saved.TryGetValue(key, out var claimId))
+                {
+                    if (!pending.TryGetValue(key, out claimId!)) claimId = MintClaimId();
+                    saved[key] = claimId;
+                    savedOrder.Add(key);
+                    PersistSaved();
+                }
+                return new SavedRewardClaim(claimId, integrationId, rewardRef);
+            }
+        }
+
+        /// <summary>Saved intents in the order they were first recorded.</summary>
+        public IReadOnlyList<SavedRewardClaim> SavedClaims()
+        {
+            lock (gate)
+            {
+                var copy = new List<SavedRewardClaim>(savedOrder.Count);
+                foreach (var key in savedOrder)
+                    copy.Add(new SavedRewardClaim(saved[key], key.IntegrationId, key.RewardRef));
+                return copy;
+            }
+        }
+
+        /// <summary>
+        /// Posts every saved intent on <c>POST /users/me/rewards/claims</c> under
+        /// the id <see cref="Save"/> kept. Call this after the login handoff.
+        /// Each outcome is the server's answer; only <see cref="RewardClaimResult.Claimed"/> is loot.
+        /// </summary>
+        public async Task<IReadOnlyList<RewardClaimOutcome>> SubmitSavedAsync(CancellationToken cancellationToken = default)
+        {
+            (string IntegrationId, string RewardRef)[] batch;
+            lock (gate) batch = savedOrder.ToArray();
+            var outcomes = new List<RewardClaimOutcome>(batch.Length);
+            foreach (var item in batch)
+            {
+                lock (gate)
+                {
+                    if (!saved.ContainsKey(item)) continue;
+                }
+                outcomes.Add(await ClaimAsync(item.IntegrationId, item.RewardRef, cancellationToken).ConfigureAwait(false));
+            }
+            return outcomes;
+        }
+
+        /// <summary>
+        /// Submits saved intents when the handoff stores a credential. Refusals
+        /// are raised on <see cref="ClaimSettled"/>; loot stays on <see cref="Claimed"/>.
+        /// </summary>
+        public void Follow(HandoffCoordinator handoff)
+        {
+            if (handoff is null) throw new ArgumentNullException(nameof(handoff));
+            handoff.Completed += _ => Observe(SubmitSavedAsync());
+        }
+
+        /// <summary>
         /// Forgets every pending claim id because the player signed out. An outstanding
         /// <see cref="ClaimAsync"/> then throws <see cref="OperationCanceledException"/> instead
-        /// of reporting its result to the next signed-in player's session.
+        /// of reporting its result to the next signed-in player's session. Saved
+        /// intents stay, so the next link submits the same claim id.
         /// </summary>
         public void Clear()
         {
@@ -254,6 +430,82 @@ namespace Haiven.Sdk
                 pending.Clear();
                 sessionGeneration++;
             }
+        }
+
+        private string MintClaimId()
+        {
+            var claimId = newClaimId();
+            if (string.IsNullOrEmpty(claimId)) throw new InvalidOperationException("haiven: the claim id source returned an empty id.");
+            return claimId;
+        }
+
+        private void ReleaseSaved((string IntegrationId, string RewardRef) key, string claimId)
+        {
+            if (!saved.TryGetValue(key, out var current) || current != claimId) return;
+            saved.Remove(key);
+            savedOrder.Remove(key);
+            PersistSaved();
+        }
+
+        private void LoadSaved()
+        {
+            if (savedStore is null) return;
+            var document = savedStore.Load();
+            if (string.IsNullOrEmpty(document)) return;
+            IHaivenJsonNode root;
+            try
+            {
+                root = HaivenJson.Parse(document);
+            }
+            catch (HaivenJsonException)
+            {
+                return;
+            }
+            if (root.Kind != HaivenJsonKind.Array) return;
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.Kind != HaivenJsonKind.Object) continue;
+                if (!item.TryGetProperty("claimId", out var claimNode) || claimNode.Kind != HaivenJsonKind.String) continue;
+                if (!item.TryGetProperty("integrationId", out var integrationNode) || integrationNode.Kind != HaivenJsonKind.String) continue;
+                if (!item.TryGetProperty("rewardRef", out var rewardNode) || rewardNode.Kind != HaivenJsonKind.String) continue;
+                var claimId = claimNode.GetString();
+                var integrationId = integrationNode.GetString();
+                var rewardRef = rewardNode.GetString();
+                if (string.IsNullOrEmpty(claimId) || string.IsNullOrEmpty(integrationId) || string.IsNullOrEmpty(rewardRef)) continue;
+                if (UnicodeCodePointCount(rewardRef) > 128) continue;
+                var key = (integrationId, rewardRef);
+                if (saved.ContainsKey(key)) continue;
+                saved[key] = claimId;
+                savedOrder.Add(key);
+            }
+        }
+
+        private void PersistSaved()
+        {
+            if (savedStore is null) return;
+            var rows = new List<Dictionary<string, string>>(savedOrder.Count);
+            foreach (var key in savedOrder)
+            {
+                rows.Add(new Dictionary<string, string>
+                {
+                    ["claimId"] = saved[key],
+                    ["integrationId"] = key.IntegrationId,
+                    ["rewardRef"] = key.RewardRef,
+                });
+            }
+            savedStore.Save(HaivenJson.Serialize(rows));
+        }
+
+        private static void Observe(Task task)
+        {
+            task.ContinueWith(
+                completed =>
+                {
+                    if (completed.IsFaulted) _ = completed.Exception;
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private static int UnicodeCodePointCount(string value)

@@ -7,7 +7,9 @@
     "UnityEngine.UI",
     "Haiven.Demo.BossRoom.P2P",
     "Unity.Netcode.Runtime",
-    "Unity.TextMeshPro"
+    "Unity.TextMeshPro",
+    "Haiven.Sdk.WebRtc",
+    "Haiven.Sdk.Samples.Netcode"
   ],
   "includePlatforms": [],
   "excludePlatforms": [

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A chat community its owner deleted; the last event it sends before its subscribers are dropped.</summary>
 	public sealed class ChatCommunityDeletedV0
 	{
 		/// <summary>The chat community identifier.</summary>

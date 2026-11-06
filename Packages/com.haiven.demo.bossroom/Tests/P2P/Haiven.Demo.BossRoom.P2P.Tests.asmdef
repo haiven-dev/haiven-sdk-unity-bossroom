@@ -8,7 +8,10 @@
     "Unity.Collections",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner",
-    "Unity.Networking.Transport"
+    "Unity.Networking.Transport",
+    "Haiven.Sdk.Core",
+    "Haiven.Sdk.WebRtc",
+    "Haiven.Sdk.Samples.Netcode"
   ],
   "includePlatforms": [],
   "excludePlatforms": [

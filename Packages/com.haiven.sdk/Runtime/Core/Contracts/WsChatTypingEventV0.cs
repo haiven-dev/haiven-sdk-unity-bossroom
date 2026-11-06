@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload of a chat typing event.</summary>
 	public sealed class WsChatTypingEventV0
 	{
 		/// <summary>The channel the typing state applies to.</summary>
