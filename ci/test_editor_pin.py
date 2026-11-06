@@ -21,6 +21,42 @@ class EditorPinTests(unittest.TestCase):
             manifest = json.loads((ROOT / "Packages" / name / "package.json").read_text())
             self.assertEqual(manifest["unity"], "6000.0", name)
 
+    def test_docs_describe_the_embedded_package(self):
+        readme_path = ROOT / "Packages/com.haiven.sdk/README.md"
+        package_path = ROOT / "Packages/com.haiven.sdk/package.json"
+        menu_path = ROOT / "Packages/com.haiven.sdk/Editor/HaivenSdkMenu.cs"
+        readme = readme_path.read_text()
+        package_text = package_path.read_text()
+        menu = menu_path.read_text()
+        docs = (
+            "https://github.com/haiven-dev/haiven-sdk-unity-bossroom/blob/"
+            "cadcd898508410f1753d370f9d8f27d8e2a3f9e4/"
+            "Packages/com.haiven.sdk/README.md"
+        )
+        sdk = json.loads(package_text)
+        self.assertEqual(sdk["documentationUrl"], docs)
+        self.assertIn(docs, menu)
+        self.assertIn("`Packages/com.haiven.sdk`", readme)
+        self.assertIn("BuiltInJsonCodec", readme)
+        self.assertIn("UnitySocket", readme)
+        self.assertIn("already embeds the package", readme)
+        self.assertTrue(
+            (ROOT / "Packages/com.haiven.sdk/Runtime/Core/Sdk/BuiltInJson.cs").is_file()
+        )
+        stub_docs = (
+            "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/"
+            "com.haiven.sdk/README.md"
+        )
+        stub_git = "https://github.com/haiven-dev/haiven-sdk-unity.git"
+        for text in (readme, package_text, menu):
+            self.assertNotIn(stub_docs, text)
+            self.assertNotIn(stub_git, text)
+            self.assertNotIn("sdk-spike", text)
+            self.assertNotIn("haiven-sdk.git", text)
+            self.assertNotIn("sdks/unity", text)
+            self.assertNotIn("?path=", text)
+            self.assertNotIn("blob/main", text)
+
     def test_demo_root_keeps_haiven_and_drops_upstream_tests(self):
         self.assertTrue((ROOT / "Assets").is_dir())
         self.assertTrue((ROOT / "ProjectSettings").is_dir())

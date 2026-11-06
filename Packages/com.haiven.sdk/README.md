@@ -4,15 +4,15 @@
 
 ## Installing
 
-Add it by git URL in the Package Manager, or in `Packages/manifest.json`:
+This Boss Room project already embeds the package at
+`Packages/com.haiven.sdk`. Use that copy. It is the tree this README
+describes: `Runtime/Core` includes `BuiltInJsonCodec`, and desktop, mobile,
+and the editor use `UnitySocket`.
 
-```json
-{
-  "dependencies": {
-    "com.haiven.sdk": "https://github.com/haiven-dev/haiven-sdk.git?path=sdks/unity/com.haiven.sdk"
-  }
-}
-```
+Do not install haiven-sdk-unity from its default branch, or from a Git URL
+with no commit or tag. That branch does not contain this package, and that
+repository has no published tag yet. Adding it replaces this copy with a
+different package.
 
 The minimum supported editor is Unity `6000.0` (Unity 6.0 LTS). This Boss Room
 demo pins editor `6000.0.52f1` (`9e4086222921`). The package still targets
@@ -146,8 +146,8 @@ using (var listener = LoopbackHandoffListener.Start(options.RedirectUri))
 
 Await it from Unity's main thread so `UnityHandoffHttpTransport` runs there.
 A busy port throws `HandoffException` from `Start`; cancelling the wait stops
-the listener. Not available on WebGL, which has no sockets. The Boss Room demo
-uses this path (`demos/bossroom`, "Sign in with Haiven").
+the listener. Not available on WebGL, which has no sockets. This Boss Room
+project uses this path (`http://127.0.0.1:47615/haiven/callback`).
 
 ## JSON: built in, or System.Text.Json by opt-in
 
@@ -156,15 +156,9 @@ generated read and write method, so the package needs no JSON library and
 IL2CPP never has to preserve members for a reflective serializer. That is the
 default; there is nothing to configure.
 
-System.Text.Json is a source-checkout-only opt-in, not part of the published
-package. Run `python3 scripts/vendor-unity.py --system-text-json` to stage the
-pinned NuGet closure restored from
-`Haiven.Sdk.Core.SystemTextJson.csproj` into a local package, then add
-`HAIVEN_SDK_SYSTEM_TEXT_JSON` to **Player Settings > Scripting Define Symbols**.
-The constrained `Haiven.Sdk.SystemTextJson.Unity` assembly then compiles the
-vendored adapter source and selects that codec before the first scene loads.
-The staging command also writes exact third-party notices. A git-URL install
-continues to use the dependency-free built-in codec because it contains no DLLs.
+System.Text.Json is not part of the published package. The staging script that
+used to vendor it is not in this repository. This embedded copy uses the
+dependency-free built-in codec.
 
 **`UnityEngine.JsonUtility` is still not a safe reader here, and the reason is
 protocol-level.** The two outbound frame shapes are told apart by the *presence*
