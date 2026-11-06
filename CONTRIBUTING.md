@@ -28,11 +28,30 @@ problem. Do not paste access tokens, passwords, or private endpoints.
    `type` is one of `feat`, `fix`, `docs`, `deps`, `style`, `refactor`,
    `perf`, `test`, `build`, `ci`, `chore`, or `revert`. `scope` is
    optional.
-4. Open the pull request against `main`. Say what changed and how you
-   checked it in the editor.
+4. Open the pull request against `main`. Run the checks below, say what
+   changed, and say how you checked the change in the editor.
 
 Do not commit access tokens, passwords, private endpoints, or local
 editor credentials.
+
+## Checks
+
+From the repository root, run:
+
+    python3 ci/test_editor_pin.py
+
+The script checks that `ProjectSettings/ProjectVersion.txt` names Unity
+editor `6000.0.52f1` and that the Haiven package `unity` fields stay on
+`6000.0`. It is not a substitute for opening the project in that editor.
+
+The Detect Project ID leak check reads
+`ProjectSettings/ProjectSettings.asset`. It fails when `cloudProjectId`
+has a value. From the repository root, run the same command as the
+Actions job `check` (Detect Project ID leak):
+
+    python3 -c "import re; import sys;content=open('ProjectSettings/ProjectSettings.asset').read();res = re.search(r'.*cloudProjectId:.*\w+\s*\n', content)!=None;status = 1 if res else 0; print('status '+str(status)); sys.exit(res)"
+
+`status 0` means `cloudProjectId` is empty. Leave that field empty.
 
 The upstream Boss Room guide follows.
 
