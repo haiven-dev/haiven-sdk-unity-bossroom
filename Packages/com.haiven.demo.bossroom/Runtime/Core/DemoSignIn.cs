@@ -221,7 +221,7 @@ namespace Haiven.Demo.BossRoom
                 // Bound before the browser opens, so a busy port fails here, not after the player signs in.
                 using (var listener = LoopbackHandoffListener.Start(options.RedirectUri))
                     received = await coordinator.LoginAsync(listener, timeout.Token);
-                if (received.ExpiresAt <= clock.UtcNow)
+                if (received.HasExpired(clock.UtcNow))
                 {
                     Publish(SessionExpired);
                     return false;
@@ -262,15 +262,16 @@ namespace Haiven.Demo.BossRoom
 
         /// <summary>
         /// Moves a signed-in handoff credential to <see cref="DemoSignInState.Expired"/>
-        /// once its expiry passes. True only on the call that expired it. The
-        /// HAIVEN_DEMO_ACCESS_TOKEN shortcut has no known expiry and is left alone.
+        /// once its expiry passes. True only on the call that expired it. A
+        /// credential issued without an expiry, and the HAIVEN_DEMO_ACCESS_TOKEN
+        /// shortcut, never expire here.
         /// </summary>
         public bool CheckExpiry()
         {
             lock (gate)
             {
                 if (current.State != DemoSignInState.SignedIn || credential is null) return false;
-                if (clock.UtcNow < credential.ExpiresAt) return false;
+                if (!credential.HasExpired(clock.UtcNow)) return false;
                 credential = null;
             }
             Publish(SessionExpired);

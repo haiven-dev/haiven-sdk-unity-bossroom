@@ -323,6 +323,8 @@ namespace Haiven.Demo.BossRoom
                 client.ItemsChanged -= Redraw;
                 client.PresentationChanged -= Redraw;
                 client.OperationFailed -= ReportOperationFailed;
+                // Close first, so the server ends the connection now rather than on its timeout.
+                if (client.Session.State != HaivenSessionState.Closed) client.Session.Close();
                 client.Dispose();
                 client = null;
             }

@@ -77,6 +77,8 @@ namespace Haiven.Demo.BossRoom.Lobby
         private HaivenDemoClient? boundClient;
         private bool entered;
         private bool hosting;
+        // When the demo's client went away mid-room with no socket to replace it.
+        private double? clientLostAt;
         private HaivenNetworkTransport? transport;
         private NetworkTransport? previousTransport;
         private float nextList;
@@ -198,6 +200,16 @@ namespace Haiven.Demo.BossRoom.Lobby
         private void Update()
         {
             Bind();
+            if (clientLostAt != null)
+            {
+                // No socket to service; the resume happens once a new client binds.
+                if (Time.realtimeSinceStartupAsDouble - clientLostAt > HaivenP2PSession.ResumeWindowSeconds)
+                {
+                    clientLostAt = null;
+                    if (p2p?.Room != null) OnEnded(HaivenP2PEndReason.ResumeWindowElapsed, null);
+                }
+                return;
+            }
             p2p?.Tick();
             if (Phase == LobbyPhase.Idle && Time.realtimeSinceStartup >= nextList) Refresh();
         }
@@ -226,6 +238,17 @@ namespace Haiven.Demo.BossRoom.Lobby
             }
 
             boundClient = client;
+            if (client == null && p2p?.Room != null)
+            {
+                // The demo dropped its client (a lapsed credential, for one) and
+                // disposed the socket without a close the controller can see.
+                // Give it the same window a dropped socket gets.
+                clientLostAt = Time.realtimeSinceStartupAsDouble;
+                Debug.Log("[haiven-lobby] the Haiven client went away; resuming within " + HaivenP2PSession.ResumeWindowSeconds + " s");
+                Say("The Haiven connection dropped. Reconnecting...");
+                return;
+            }
+            clientLostAt = null;
             if (client == null || !Configure())
             {
                 if (!entered) Phase = LobbyPhase.SignedOut;
