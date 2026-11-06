@@ -20,13 +20,40 @@ class EditorPinTests(unittest.TestCase):
         for name in ("com.haiven.sdk", "com.haiven.demo.bossroom"):
             manifest = json.loads((ROOT / "Packages" / name / "package.json").read_text())
             self.assertEqual(manifest["unity"], "6000.0", name)
-        sdk = json.loads((ROOT / "Packages/com.haiven.sdk/package.json").read_text())
-        docs = "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/com.haiven.sdk/README.md"
+
+    def test_docs_describe_the_embedded_package(self):
+        readme_path = ROOT / "Packages/com.haiven.sdk/README.md"
+        package_path = ROOT / "Packages/com.haiven.sdk/package.json"
+        menu_path = ROOT / "Packages/com.haiven.sdk/Editor/HaivenSdkMenu.cs"
+        readme = readme_path.read_text()
+        package_text = package_path.read_text()
+        menu = menu_path.read_text()
+        docs = (
+            "https://github.com/haiven-dev/haiven-sdk-unity-bossroom/blob/main/"
+            "Packages/com.haiven.sdk/README.md"
+        )
+        sdk = json.loads(package_text)
         self.assertEqual(sdk["documentationUrl"], docs)
-        menu = (ROOT / "Packages/com.haiven.sdk/Editor/HaivenSdkMenu.cs").read_text()
         self.assertIn(docs, menu)
-        self.assertNotIn("sdks/unity", menu)
-        self.assertNotIn("haiven-sdk.git?path=sdks/unity", (ROOT / "Packages/com.haiven.sdk/README.md").read_text())
+        self.assertIn("`Packages/com.haiven.sdk`", readme)
+        self.assertIn("BuiltInJsonCodec", readme)
+        self.assertIn("UnitySocket", readme)
+        self.assertIn("already embeds the package", readme)
+        self.assertTrue(
+            (ROOT / "Packages/com.haiven.sdk/Runtime/Core/Sdk/BuiltInJson.cs").is_file()
+        )
+        stub_docs = (
+            "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/"
+            "com.haiven.sdk/README.md"
+        )
+        stub_git = "https://github.com/haiven-dev/haiven-sdk-unity.git"
+        for text in (readme, package_text, menu):
+            self.assertNotIn(stub_docs, text)
+            self.assertNotIn(stub_git, text)
+            self.assertNotIn("sdk-spike", text)
+            self.assertNotIn("haiven-sdk.git", text)
+            self.assertNotIn("sdks/unity", text)
+            self.assertNotIn("?path=", text)
 
     def test_demo_root_keeps_haiven_and_drops_upstream_tests(self):
         self.assertTrue((ROOT / "Assets").is_dir())

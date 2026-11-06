@@ -4,15 +4,15 @@
 
 ## Installing
 
-Add it by git URL in the Package Manager, or in `Packages/manifest.json`:
+This Boss Room project already embeds the package at
+`Packages/com.haiven.sdk`. Use that copy. It is the tree this README
+describes: `Runtime/Core` includes `BuiltInJsonCodec`, and desktop, mobile,
+and the editor use `UnitySocket`.
 
-```json
-{
-  "dependencies": {
-    "com.haiven.sdk": "https://github.com/haiven-dev/haiven-sdk-unity.git?path=com.haiven.sdk"
-  }
-}
-```
+Do not install haiven-sdk-unity from its default branch, or from a Git URL
+with no commit or tag. That branch does not contain this package, and that
+repository has no published tag yet. Adding it replaces this copy with a
+different package.
 
 The minimum supported editor is Unity `6000.0` (Unity 6.0 LTS). This Boss Room
 demo pins editor `6000.0.52f1` (`9e4086222921`). The package still targets
@@ -157,8 +157,8 @@ IL2CPP never has to preserve members for a reflective serializer. That is the
 default; there is nothing to configure.
 
 System.Text.Json is not part of the published package. The staging script that
-used to vendor it is not in this repository. This demo and a git-URL install
-of `com.haiven.sdk` use the dependency-free built-in codec.
+used to vendor it is not in this repository. This embedded copy uses the
+dependency-free built-in codec.
 
 **`UnityEngine.JsonUtility` is still not a safe reader here, and the reason is
 protocol-level.** The two outbound frame shapes are told apart by the *presence*

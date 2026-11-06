@@ -12,7 +12,7 @@ namespace Haiven.Sdk.Editor
     {
         /// <summary>The package README, the same page as package.json's documentationUrl.</summary>
         public const string DocumentationUrl =
-            "https://github.com/haiven-dev/haiven-sdk-unity/blob/main/com.haiven.sdk/README.md";
+            "https://github.com/haiven-dev/haiven-sdk-unity-bossroom/blob/main/Packages/com.haiven.sdk/README.md";
 
         [MenuItem("Help/Haiven SDK/Documentation")]
         public static void OpenDocumentation() => Application.OpenURL(DocumentationUrl);
