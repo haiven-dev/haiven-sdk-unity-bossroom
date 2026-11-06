@@ -29,7 +29,8 @@ class EditorPinTests(unittest.TestCase):
         package_text = package_path.read_text()
         menu = menu_path.read_text()
         docs = (
-            "https://github.com/haiven-dev/haiven-sdk-unity-bossroom/blob/main/"
+            "https://github.com/haiven-dev/haiven-sdk-unity-bossroom/blob/"
+            "cadcd898508410f1753d370f9d8f27d8e2a3f9e4/"
             "Packages/com.haiven.sdk/README.md"
         )
         sdk = json.loads(package_text)
@@ -54,6 +55,7 @@ class EditorPinTests(unittest.TestCase):
             self.assertNotIn("haiven-sdk.git", text)
             self.assertNotIn("sdks/unity", text)
             self.assertNotIn("?path=", text)
+            self.assertNotIn("blob/main", text)
 
     def test_demo_root_keeps_haiven_and_drops_upstream_tests(self):
         self.assertTrue((ROOT / "Assets").is_dir())
