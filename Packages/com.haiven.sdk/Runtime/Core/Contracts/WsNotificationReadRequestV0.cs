@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload a client sends on a notifications.read frame, marking a whole category read.</summary>
 	public sealed class WsNotificationReadRequestV0
 	{
 		/// <summary>The notification category to mark read, one of chat, user or general.</summary>

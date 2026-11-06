@@ -19,6 +19,7 @@ namespace Haiven.Sdk.Contracts
 		public string? LeftAt { get; set; }
 	}
 
+	/// <summary>The payload of a direct-message membership event.</summary>
 	public sealed class WsChatDmEventV0
 	{
 		/// <summary>The direct-message channel this event is about.</summary>

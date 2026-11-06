@@ -15,6 +15,73 @@ namespace Haiven.Sdk
         Closed,
     }
 
+    /// <summary>
+    /// What a socket close means for the credential that opened it. Finite and
+    /// SDK-local: the server sends a close code and a reason string, and this is
+    /// the part of them a game acts on.
+    /// </summary>
+    public enum HaivenSessionCloseKind
+    {
+        /// <summary>
+        /// The connection ended for a reason unrelated to the credential: network
+        /// loss, a server restart, or the caller's own close. The credential is
+        /// still good, and a new socket may authenticate with it.
+        /// </summary>
+        Transport,
+
+        /// <summary><c>1008 unauthorized</c>: the server refused the credential in the handshake.</summary>
+        CredentialRefused,
+
+        /// <summary>
+        /// <c>1008 credential_revoked</c>: the player or an operator revoked the
+        /// game credential while the socket was open.
+        /// </summary>
+        CredentialRevoked,
+
+        /// <summary>
+        /// Any other <c>1008</c>, for example <c>parental_consent_denied</c>. The
+        /// server refused this socket for a reason a new socket with the same
+        /// credential does not change.
+        /// </summary>
+        Policy,
+    }
+
+    /// <summary>Classifies socket closes, identically in every Haiven SDK.</summary>
+    public static class HaivenSessionClose
+    {
+        /// <summary><c>websocket.StatusPolicyViolation</c>: every close the server makes on purpose.</summary>
+        public const int PolicyViolation = 1008;
+
+        /// <summary>Classifies a close by its code and reason alone.</summary>
+        public static HaivenSessionCloseKind Classify(int code, string? reason)
+        {
+            if (code != PolicyViolation) return HaivenSessionCloseKind.Transport;
+            switch (reason)
+            {
+                case "unauthorized":
+                    return HaivenSessionCloseKind.CredentialRefused;
+                case "credential_revoked":
+                    return HaivenSessionCloseKind.CredentialRevoked;
+                default:
+                    return HaivenSessionCloseKind.Policy;
+            }
+        }
+
+        /// <summary>
+        /// True when the credential will not authenticate again: discard it and
+        /// run the game login handoff before opening another socket.
+        /// </summary>
+        public static bool RequiresSignIn(HaivenSessionCloseKind kind) =>
+            kind == HaivenSessionCloseKind.CredentialRefused || kind == HaivenSessionCloseKind.CredentialRevoked;
+
+        /// <summary>
+        /// True when a new socket may authenticate with the same credential. Only
+        /// a transport close qualifies; reconnecting after any <c>1008</c> repeats
+        /// the refusal.
+        /// </summary>
+        public static bool MayReconnect(HaivenSessionCloseKind kind) => kind == HaivenSessionCloseKind.Transport;
+    }
+
     /// <summary>A parsed server frame together with the exact text received.</summary>
     public sealed class ReceivedFrame
     {
@@ -93,12 +160,29 @@ namespace Haiven.Sdk
 
         /// <summary>
         /// The server refused a re-auth credential (<c>auth.failure</c> on a live
-        /// socket), with its code. Not an ordinary lapse: the session stops
-        /// re-authenticating, and the caller must sign in again.
+        /// socket), with its code. The session stops same-socket re-authentication;
+        /// <see cref="CredentialActionRequired"/> says whether to retry fresh.
         /// </summary>
         public event Action<string?>? AuthenticationFailed;
 
+        /// <summary>
+        /// Asks the credential owner to clear a rejected credential or retry a
+        /// refused same-socket re-auth on a fresh socket. Ordinary disconnects
+        /// deliberately produce no action.
+        /// </summary>
+        public event Action<HaivenCredentialAction>? CredentialActionRequired;
+
+        /// <summary>
+        /// The socket closed, with the code and reason it closed with. <see cref="CloseKind"/>
+        /// is already set when this is raised.
+        /// </summary>
         public event Action<int, string>? Closed;
+
+        /// <summary>
+        /// What the close means for the credential, once the session is closed;
+        /// null before. See <see cref="HaivenSessionClose"/>.
+        /// </summary>
+        public HaivenSessionCloseKind? CloseKind { get; private set; }
 
         /// <summary>Starts the required first-frame authentication exactly once.</summary>
         public void Opened()
@@ -289,8 +373,12 @@ namespace Haiven.Sdk
 
             if (received.Frame.Type == AuthFailure)
             {
-                // Stay expired and stop: a further auth.expired starts no re-auth.
+                // Same-socket refusal is not proof the credential is invalid. A
+                // fresh first-frame handshake is the authoritative check.
                 State = HaivenSessionState.Expired;
+                var credentialAction = HaivenCredentialLifecycle.ForAuthenticationFailure(received.Frame.Error);
+                if (credentialAction != HaivenCredentialAction.Retain)
+                    CredentialActionRequired?.Invoke(credentialAction);
                 AuthenticationFailed?.Invoke(received.Frame.Error);
                 return;
             }
@@ -315,10 +403,15 @@ namespace Haiven.Sdk
         private void SocketClosed(int code, string reason)
         {
             if (State == HaivenSessionState.Closed) return;
+            var previousState = State;
+            CloseKind = HaivenSessionClose.Classify(code, reason);
             State = HaivenSessionState.Closed;
             pending.Clear();
             inFlight.Clear();
             awaitingResend.Clear();
+            var credentialAction = HaivenCredentialLifecycle.ForSocketClose(previousState, code, reason);
+            if (credentialAction != HaivenCredentialAction.Retain)
+                CredentialActionRequired?.Invoke(credentialAction);
             Closed?.Invoke(code, reason);
         }
 

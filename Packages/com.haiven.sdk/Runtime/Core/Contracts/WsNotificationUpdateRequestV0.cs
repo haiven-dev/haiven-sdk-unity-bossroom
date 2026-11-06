@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload a client sends on a notifications.update frame, revising one notification.</summary>
 	public sealed class WsNotificationUpdateRequestV0
 	{
 		/// <summary>The notification to revise.</summary>

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A link of a Google or Apple identity started from settings that was refused or abandoned.</summary>
 	public sealed class AccountIdentityLinkFailedV0
 	{
 		/// <summary>The sign-in provider of the identity: google or apple.</summary>

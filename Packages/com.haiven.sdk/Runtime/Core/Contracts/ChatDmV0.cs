@@ -40,6 +40,7 @@ namespace Haiven.Sdk.Contracts
 		public string LeftAt { get; set; } = null!;
 	}
 
+	/// <summary>A direct-message channel and its other participant.</summary>
 	public sealed class ChatDmV0
 	{
 		/// <summary>The chat channel identifier.</summary>

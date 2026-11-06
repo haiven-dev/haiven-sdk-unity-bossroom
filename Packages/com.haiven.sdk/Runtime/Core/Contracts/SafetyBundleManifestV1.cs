@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The signed manifest a client verifies before accepting a rotatable embedded policy bundle.</summary>
 	public sealed class SafetyBundleManifestV1
 	{
 		/// <summary>Shared contract schema name.</summary>

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>Every frame a client sends over the /v0/ws socket.</summary>
 	public sealed class WsClientFrameV0
 	{
 		/// <summary>The frame discriminator, such as chat.send or ping. Clients must accept a type minted after they shipped rather than treating it as a protocol error.</summary>

@@ -17,6 +17,7 @@ namespace Haiven.Sdk
     /// </summary>
     public interface IAnalyticsScheduler
     {
+        /// <summary>Runs <paramref name="operation"/> later. Throwing means it was not scheduled.</summary>
         void Start(Func<Task> operation);
         Task Delay(TimeSpan duration, CancellationToken cancellationToken);
         void Post(Action callback);
@@ -209,7 +210,10 @@ namespace Haiven.Sdk
             this.utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
         }
 
-        /// <summary>Raised asynchronously; subscriber work never runs in <see cref="TryEnqueue(AnalyticsEvent)"/>.</summary>
+        /// <summary>
+        /// Raised asynchronously, except when the scheduler itself refuses to start. That failure is
+        /// delivered inline because the scheduler cannot be trusted to dispatch it.
+        /// </summary>
         public event Action<AnalyticsDiagnostic>? Diagnostic;
 
         public int BufferedEventCount
@@ -223,6 +227,8 @@ namespace Haiven.Sdk
         /// <summary>
         /// Adds an event without waiting for network I/O. Returns false when the configured
         /// memory bound has been reached. Missing event/session ids and occurredAt are filled once.
+        /// When the scheduler refuses to start a drain, the queue is dropped (reported as
+        /// <see cref="AnalyticsDiagnosticKind.BatchDropped"/>), flushes settle, and the error is rethrown.
         /// </summary>
         public bool TryEnqueue(AnalyticsEvent analyticsEvent)
         {
@@ -258,7 +264,7 @@ namespace Haiven.Sdk
                 }
             }
 
-            if (startPump) scheduler.Start(PumpAsync);
+            if (startPump) StartPump();
             return true;
         }
 
@@ -310,6 +316,37 @@ namespace Haiven.Sdk
             }
             if (queuedIds is not null)
                 Publish(new AnalyticsDiagnostic(AnalyticsDiagnosticKind.BatchDropped, queuedIds, reason: "batcher disposed"));
+        }
+
+        private void StartPump()
+        {
+            try
+            {
+                scheduler.Start(PumpAsync);
+            }
+            catch (Exception error)
+            {
+                // A host scheduler can refuse work (a destroyed Unity component
+                // throws ObjectDisposedException). No pump owns the queue then, so
+                // drop what it holds and settle FlushAsync now; leaving pumping set
+                // would make every later flush wait out its caller's timeout.
+                List<string> queuedIds;
+                lock (gate)
+                {
+                    pumping = false;
+                    queuedIds = queue.Select(EventId).ToList();
+                    bufferedEvents -= queue.Count;
+                    queue.Clear();
+                    idle.TrySetResult(true);
+                }
+                Interlocked.Add(ref droppedEvents, queuedIds.Count);
+                PublishInline(new AnalyticsDiagnostic(
+                    AnalyticsDiagnosticKind.BatchDropped,
+                    queuedIds,
+                    exception: error,
+                    reason: "analytics scheduler failed to start"));
+                throw;
+            }
         }
 
         private async Task PumpAsync()
@@ -439,14 +476,23 @@ namespace Haiven.Sdk
         {
             var handlers = Diagnostic;
             if (handlers is null) return;
-            scheduler.Post(() =>
+            scheduler.Post(() => NotifyHandlers(handlers, diagnostic));
+        }
+
+        private void PublishInline(AnalyticsDiagnostic diagnostic)
+        {
+            var handlers = Diagnostic;
+            if (handlers is null) return;
+            NotifyHandlers(handlers, diagnostic);
+        }
+
+        private static void NotifyHandlers(Action<AnalyticsDiagnostic> handlers, AnalyticsDiagnostic diagnostic)
+        {
+            foreach (Action<AnalyticsDiagnostic> handler in handlers.GetInvocationList())
             {
-                foreach (Action<AnalyticsDiagnostic> handler in handlers.GetInvocationList())
-                {
-                    try { handler(diagnostic); }
-                    catch { /* Diagnostics must not stop or delay delivery. */ }
-                }
-            });
+                try { handler(diagnostic); }
+                catch { /* Diagnostics must not stop or delay delivery. */ }
+            }
         }
 
         private static AnalyticsEvent Snapshot(AnalyticsEvent analyticsEvent)

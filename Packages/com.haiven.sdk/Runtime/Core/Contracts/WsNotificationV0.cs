@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A stored notification belonging to the authenticated user.</summary>
 	public sealed class WsNotificationV0
 	{
 		/// <summary>The notification's server-assigned identifier.</summary>

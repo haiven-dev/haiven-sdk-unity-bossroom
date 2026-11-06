@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The input a client hands to the embedded policy evaluator for one piece of content.</summary>
 	public sealed class ContentSafetyInputV1
 	{
 		/// <summary>Kind of content being assessed, such as chat-message.</summary>

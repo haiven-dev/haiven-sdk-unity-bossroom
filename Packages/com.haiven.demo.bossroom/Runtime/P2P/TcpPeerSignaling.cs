@@ -7,14 +7,16 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using Haiven.Sdk;
 using UnityEngine;
 
 namespace Haiven.Demo.BossRoom.P2P
 {
     /// <summary>
     /// Signaling between Boss Room processes over one TCP connection per guest,
-    /// on the address and port typed into Boss Room's IP window. It stands in for
-    /// <c>p2p.signal</c> on the Haiven game socket until the SDK controller exists.
+    /// on the address and port typed into Boss Room's IP window, for Direct IP
+    /// play without a Haiven session. A Haiven room signals through
+    /// <c>p2p.signal</c> on the game socket instead.
     ///
     /// The host names every guest, the way haiven-api sets <c>fromUserId</c>, so
     /// a guest cannot claim another guest's id. Messages are one JSON object per

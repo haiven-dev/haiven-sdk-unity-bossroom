@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A server frame that answers one frame the client sent.</summary>
 	public sealed class WsServerReplyV0
 	{
 		/// <summary>The frame discriminator, echoing the type of the frame being answered or naming an auth outcome.</summary>

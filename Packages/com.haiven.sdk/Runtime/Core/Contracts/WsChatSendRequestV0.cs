@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload a client sends on a chat.send frame, posting a message to a channel.</summary>
 	public sealed class WsChatSendRequestV0
 	{
 		/// <summary>The channel to post the message to.</summary>

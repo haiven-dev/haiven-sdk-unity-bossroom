@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload of a chat community update.</summary>
 	public sealed class WsChatServerEventV0
 	{
 		/// <summary>The community this event is about.</summary>

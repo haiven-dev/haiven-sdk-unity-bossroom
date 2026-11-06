@@ -1,0 +1,20 @@
+{
+  "name": "Haiven.Sdk.Samples.Netcode",
+  "rootNamespace": "Haiven.Sdk.Samples.Netcode",
+  "references": [
+    "Haiven.Sdk.Core",
+    "Haiven.Sdk.WebRtc",
+    "Unity.Netcode.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "WebGL"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

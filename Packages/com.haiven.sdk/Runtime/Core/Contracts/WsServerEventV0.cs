@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A server frame the client did not ask for.</summary>
 	public sealed class WsServerEventV0
 	{
 		/// <summary>The frame discriminator, naming what happened.</summary>

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload a client sends on a notifications.get frame, selecting one notification.</summary>
 	public sealed class WsNotificationGetRequestV0
 	{
 		/// <summary>The notification to fetch.</summary>

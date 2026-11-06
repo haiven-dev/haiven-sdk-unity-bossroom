@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A user's typing state in a chat channel.</summary>
 	public sealed class ChatTypingV0
 	{
 		/// <summary>The chat channel identifier.</summary>

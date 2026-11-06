@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A visible update to a chat community.</summary>
 	public sealed class ChatCommunityUpdateV0
 	{
 		/// <summary>The chat community identifier.</summary>

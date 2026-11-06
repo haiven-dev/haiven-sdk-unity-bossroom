@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload of a chat message event.</summary>
 	public sealed class WsChatMessageEventV0
 	{
 		/// <summary>The channel the message belongs to.</summary>

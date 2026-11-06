@@ -48,6 +48,46 @@ namespace Haiven.Sdk.Tests
             Assert.That(posted, Is.False, "destroyed schedulers must drop queued callbacks");
         }
 
+        [UnityTest] public IEnumerator DestroyedSchedulerReportsRefusedBatch()
+        {
+            var host = new GameObject("analytics-batcher-refused-start-test");
+            var scheduler = host.AddComponent<UnityAnalyticsScheduler>();
+            var batcher = new AnalyticsBatcher(
+                new RestApi(new UnexpectedTransport()),
+                new AnalyticsContext
+                {
+                    Environment = "test",
+                    IntegrationId = "integration",
+                    Platform = "unity",
+                    Sdk = new AnalyticsSDK { Name = "haiven-unity", Version = "test" },
+                },
+                new AnalyticsBatcherOptions
+                {
+                    BatchSize = 1,
+                    MaxBufferedEvents = 1,
+                    FlushInterval = TimeSpan.Zero,
+                },
+                scheduler: scheduler);
+            AnalyticsDiagnostic refused = null;
+            batcher.Diagnostic += diagnostic => refused = diagnostic;
+
+            UnityEngine.Object.DestroyImmediate(host);
+            Assert.Throws<ObjectDisposedException>(() => batcher.TryEnqueue(new AnalyticsEvent
+            {
+                EventId = "refused-event",
+                Type = "scheduler.destroyed",
+            }));
+
+            Assert.That(batcher.FlushAsync().IsCompletedSuccessfully, Is.True);
+            Assert.That(batcher.BufferedEventCount, Is.Zero);
+            Assert.That(batcher.DroppedEventCount, Is.EqualTo(1));
+            Assert.That(refused, Is.Not.Null, "the refused-start diagnostic must not use the destroyed scheduler");
+            Assert.That(refused.EventIds, Is.EqualTo(new[] { "refused-event" }));
+            Assert.That(refused.Exception, Is.TypeOf<ObjectDisposedException>());
+            batcher.Dispose();
+            yield break;
+        }
+
         [UnityTest] public IEnumerator DisposeAndDestroySettleBatcherFlush()
         {
             var host = new GameObject("analytics-batcher-destroy-test");

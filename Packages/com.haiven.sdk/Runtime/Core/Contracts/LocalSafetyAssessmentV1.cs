@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The advisory result of an embedded policy evaluation, surfaced to the client before the server has decided.</summary>
 	public sealed class LocalSafetyAssessmentV1
 	{
 		/// <summary>Advisory outcome of the local evaluation; never an authoritative allow.</summary>

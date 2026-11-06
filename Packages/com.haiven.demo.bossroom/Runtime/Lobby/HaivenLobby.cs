@@ -3,10 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Haiven.Demo.BossRoom.P2P;
 using Haiven.Sdk;
-using Haiven.Sdk.Json;
+using Haiven.Sdk.Rest;
+using Haiven.Sdk.Samples.Netcode;
+using Haiven.Sdk.WebRtc;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -26,10 +29,39 @@ namespace Haiven.Demo.BossRoom.Lobby
         InRoom,
     }
 
+    /// <summary>One room in the list, as <c>GET /v0/games/{game_id}/sessions</c> returns it.</summary>
+    public sealed class SessionListing
+    {
+        public string SessionId = "";
+        public string HostUserId = "";
+        public string Visibility = "";
+        public int MaxMembers;
+        public int MemberCount;
+        public string RelayPolicy = "";
+        public string State = "";
+        public string Name = "";
+
+        public bool IsFull => MemberCount >= MaxMembers;
+
+        internal static SessionListing From(ListedSession listed) => new SessionListing
+        {
+            SessionId = listed.SessionId ?? "",
+            HostUserId = listed.HostUserId ?? "",
+            Visibility = listed.Visibility ?? "",
+            MaxMembers = (int)(listed.MaxMembers ?? 0),
+            MemberCount = (int)(listed.MemberCount ?? 0),
+            RelayPolicy = listed.RelayPolicy ?? "",
+            State = listed.State ?? "",
+            Name = listed.Metadata != null && listed.Metadata.TryGetValue("name", out var name) ? name : "",
+        };
+    }
+
     /// <summary>
     /// Haiven rooms for Boss Room: list, create and join through haiven-api's
-    /// sessions, then play over the Haiven WebRTC transport with signaling and
-    /// TURN credentials from the same game socket.
+    /// sessions, then play over the Haiven WebRTC transport. The SDK's P2P
+    /// controller, <see cref="HaivenP2PSession"/>, owns admission, signaling,
+    /// ICE servers, resume and the host's roster check; this class connects it
+    /// to the demo's sign-in, Boss Room's connection flow and the lobby view.
     ///
     /// The list is what the server lets this player join: it already filters by
     /// age group (adults see adults rooms, a child sees rooms of the same band),
@@ -39,29 +71,18 @@ namespace Haiven.Demo.BossRoom.Lobby
     public sealed class HaivenLobby : MonoBehaviour
     {
         private const float ListInterval = 5f;
-        private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
 
-        private SessionsApi? api;
-        private SessionChannel? channel;
+        private HaivenSessionsClient? sessions;
+        private HaivenP2PSession? p2p;
         private HaivenDemoClient? boundClient;
-        private SessionAdmission? room;
+        private bool entered;
         private bool hosting;
+        // When the demo's client went away mid-room with no socket to replace it.
+        private double? clientLostAt;
         private HaivenNetworkTransport? transport;
         private NetworkTransport? previousTransport;
-        private SessionPeerSignaling? signaling;
-        private DateTimeOffset? refreshIceAt;
         private float nextList;
         private bool listing;
-
-        // ADR 0036 points 7 and 16: the server holds a dropped participation for
-        // 30 seconds, and the host checks the roster every 30 seconds.
-        internal const float ResumeWindow = 30f;
-        internal const float RosterInterval = 30f;
-        private float? lostAt;
-        private bool resuming;
-        private bool resumeInFlight;
-        private float nextRoster;
-        private bool rosterRunning;
         private string? pendingStatus;
 
         public LobbyPhase Phase { get; private set; } = LobbyPhase.SignedOut;
@@ -72,12 +93,12 @@ namespace Haiven.Demo.BossRoom.Lobby
         public string Status { get; private set; } = "";
 
         /// <summary>The room joined or hosted, while in one.</summary>
-        public SessionAdmission? Room => room;
+        public HaivenSessionAdmission? Room => p2p?.Room;
 
         public bool Hosting => hosting;
 
         /// <summary>What the host shares for a private or mixed room: the room id and its code.</summary>
-        public string? ShareCode => room != null && hosting && !string.IsNullOrEmpty(room.JoinCode)
+        public string? ShareCode => Room is { Hosting: true } room && !string.IsNullOrEmpty(room.JoinCode)
             ? room.SessionId + "/" + room.JoinCode
             : null;
 
@@ -96,11 +117,11 @@ namespace Haiven.Demo.BossRoom.Lobby
 
         public async void Refresh()
         {
-            if (api == null || listing) return;
+            if (sessions == null || boundClient == null || listing) return;
             listing = true;
             try
             {
-                Rooms = await api.ListAsync();
+                Rooms = (await sessions.ListAsync()).Select(SessionListing.From).ToList();
                 if (Phase == LobbyPhase.Idle && Status.StartsWith("Could not list")) Status = "";
             }
             catch (Exception error)
@@ -115,16 +136,19 @@ namespace Haiven.Demo.BossRoom.Lobby
             }
         }
 
-        public async void Create(string name, SessionVisibility visibility, int maxMembers, bool allowMixedAges)
+        public async void Create(string name, HaivenSessionVisibility visibility, int maxMembers, bool allowMixedAges)
         {
-            if (!Ready(out var connectionId)) return;
+            if (!Ready()) return;
             Begin("Creating the room…");
             try
             {
-                var created = await api!.CreateAsync(connectionId, Name(name), visibility, maxMembers,
-                    allowMixedAges && visibility != SessionVisibility.Public);
-                created.JoinPayload = null;
-                await EnterAsync(created, hosting: true);
+                var options = new HaivenSessionCreateOptions(maxMembers)
+                {
+                    Visibility = visibility,
+                    AllowMixedAges = allowMixedAges && visibility != HaivenSessionVisibility.Public,
+                    Metadata = new Dictionary<string, string> { ["name"] = Name(name) },
+                };
+                Enter(await p2p!.CreateAsync(options));
             }
             catch (Exception error)
             {
@@ -135,12 +159,11 @@ namespace Haiven.Demo.BossRoom.Lobby
         /// <summary>Joins a listed room by id, or a private or mixed one with the host's share code.</summary>
         public async void Join(string sessionId, string? joinCode = null)
         {
-            if (!Ready(out var connectionId)) return;
+            if (!Ready()) return;
             Begin("Joining the room…");
             try
             {
-                var joined = await api!.JoinAsync(connectionId, sessionId, joinCode);
-                await EnterAsync(joined, hosting: false);
+                Enter(await p2p!.JoinAsync(sessionId, joinCode));
             }
             catch (Exception error)
             {
@@ -168,173 +191,44 @@ namespace Haiven.Demo.BossRoom.Lobby
             else _ = EndRoomAsync("You left the room.");
         }
 
-        private void Update()
-        {
-            Bind();
-            channel?.Pump();
-            if (Phase == LobbyPhase.Idle && Time.realtimeSinceStartup >= nextList) Refresh();
-            if (room == null) return;
-            if (resuming)
-            {
-                KeepResuming();
-                return;
-            }
-            if (refreshIceAt != null && DateTimeOffset.UtcNow >= refreshIceAt) _ = RefreshIceAsync();
-            if (hosting && Phase == LobbyPhase.InRoom && Time.realtimeSinceStartup >= nextRoster) _ = CheckRosterAsync();
-        }
-
         /// <summary>
         /// Closes the game socket on purpose, as a dropped network would, so the
         /// resume can be tried by hand. The demo opens a new socket on its own.
         /// </summary>
         public void DropHaivenConnection() => boundClient?.Session.Close();
 
-        // The socket that carried the room is gone. The room stays while the demo
-        // opens a new one, and the participation resumes on it within 30 seconds;
-        // the peer connections keep running meanwhile (SDK-P2P-5).
-        private void OnChannelLost()
+        private void Update()
         {
-            if (room == null || resuming) return;
-            resuming = true;
-            lostAt = Time.realtimeSinceStartup;
-            Status = "The Haiven connection dropped. Reconnecting...";
-            Debug.Log("[haiven-lobby] game socket lost; resuming within " + ResumeWindow + " s");
-            Changed?.Invoke();
-        }
-
-        private void KeepResuming()
-        {
-            if (resumeInFlight || room == null) return;
-            if (channel != null && channel.ConnectionId == null && boundClient?.ConnectionId != null)
-                channel.UseConnectionId(boundClient.ConnectionId);
-            if (lostAt != null && Time.realtimeSinceStartup - lostAt > ResumeWindow)
+            Bind();
+            if (clientLostAt != null)
             {
-                LoseRoom("The Haiven connection did not come back within 30 seconds, so the room ended for you.");
+                // No socket to service; the resume happens once a new client binds.
+                if (Time.realtimeSinceStartupAsDouble - clientLostAt > HaivenP2PSession.ResumeWindowSeconds)
+                {
+                    clientLostAt = null;
+                    if (p2p?.Room != null) OnEnded(HaivenP2PEndReason.ResumeWindowElapsed, null);
+                }
                 return;
             }
-            if (channel != null && channel.IsOpen && channel.ConnectionId != room.ConnectionId) _ = ResumeAsync();
-        }
-
-        private async Task ResumeAsync()
-        {
-            resumeInFlight = true;
-            var resumed = channel!;
-            var current = room!;
-            try
-            {
-                var reply = await resumed.RequestAsync("session.resume", new Dictionary<string, object?>
-                {
-                    ["participationId"] = current.ParticipationId,
-                    ["previousConnectionId"] = current.ConnectionId,
-                    ["resumeToken"] = current.ResumeToken,
-                }, RequestTimeout);
-                if (room != current) return;
-                if (reply.Success != true)
-                {
-                    // session_not_found covers every refusal: the window ended,
-                    // the room closed, or another socket resumed first.
-                    LoseRoom("Haiven ended your place in the room (" + (reply.Error ?? "refused") + ").");
-                    return;
-                }
-                var moved = reply.Payload != null ? SessionsApi.Text(reply.Payload, "connectionId") : "";
-                current.ConnectionId = moved.Length > 0 ? moved : resumed.ConnectionId ?? "";
-                signaling?.Rebind(resumed);
-                resuming = false;
-                lostAt = null;
-                Status = "Reconnected to Haiven; the room carries on.";
-                Debug.Log("[haiven-lobby] resumed the participation on connection " + current.ConnectionId);
-                // After a resume the host reads the roster at once (SDK-P2P-10):
-                // an event sent during the gap may be lost.
-                nextRoster = 0f;
-                Changed?.Invoke();
-            }
-            catch (Exception error) when (error is TimeoutException || error is InvalidOperationException)
-            {
-                // The new socket closed or did not answer; the next one tries again while the window lasts.
-                Debug.LogWarning("[haiven-lobby] resume did not complete: " + error.Message);
-            }
-            finally
-            {
-                resumeInFlight = false;
-            }
-        }
-
-        // The host closes the connection to anyone the server no longer lists,
-        // in case a session.member.left was lost (ADR 0036 point 16).
-        private async Task CheckRosterAsync()
-        {
-            if (rosterRunning || api == null || room == null) return;
-            rosterRunning = true;
-            nextRoster = Time.realtimeSinceStartup + RosterInterval;
-            var current = room;
-            try
-            {
-                var roster = await api.RosterAsync(current.SessionId);
-                if (room != current || transport == null) return;
-                foreach (var userId in NotOnRoster(transport.ConnectedUsers(), roster.Members))
-                {
-                    Debug.Log("[haiven-lobby] " + userId + " is not on the roster any more; closing its connection");
-                    transport.DropUser(userId);
-                    Status = "A player is no longer in the room.";
-                    Changed?.Invoke();
-                }
-            }
-            catch (HaivenRestException error) when (error.Code == "session_not_found")
-            {
-                if (room == current) LoseRoom("The room is closed.");
-            }
-            catch (Exception error)
-            {
-                Debug.LogWarning("[haiven-lobby] roster read failed: " + Describe(error));
-            }
-            finally
-            {
-                rosterRunning = false;
-            }
-        }
-
-        /// <summary>Connected peers the roster no longer lists.</summary>
-        internal static List<string> NotOnRoster(IEnumerable<string> connected, IEnumerable<string> roster)
-        {
-            var members = new HashSet<string>(roster);
-            return connected.Where(user => !members.Contains(user)).ToList();
-        }
-
-        private void LoseRoom(string status)
-        {
-            resuming = false;
-            lostAt = null;
-            var manager = NetworkManager.Singleton;
-            if (manager != null && manager.IsListening)
-            {
-                pendingStatus = status;
-                manager.Shutdown();
-            }
-            else
-            {
-                _ = EndRoomAsync(status);
-            }
+            p2p?.Tick();
+            if (Phase == LobbyPhase.Idle && Time.realtimeSinceStartup >= nextList) Refresh();
         }
 
         private void OnDestroy()
         {
-            if (room != null && api != null) _ = api.LeaveAsync(room.SessionId);
-            Unbind();
+            if (p2p?.Room != null) _ = p2p.LeaveAsync();
+            p2p?.Dispose();
         }
 
-        // Follows the demo's sign-in: a new client means a new socket to bind to.
+        // Follows the demo's sign-in: each new client is a new game socket. In a
+        // room the controller resumes the participation on it within 30 seconds;
+        // the peer connections keep running meanwhile (SDK-P2P-5).
         private void Bind()
         {
             var client = HaivenBossRoomDemo.Current?.Client;
-            var settings = HaivenBossRoomDemo.Current?.Settings;
-            if (client != boundClient && room != null)
-            {
-                Rebind(client, settings);
-                return;
-            }
             if (client == boundClient)
             {
-                if (client != null && Phase == LobbyPhase.SignedOut && client.ConnectionId != null)
+                if (client != null && p2p != null && Phase == LobbyPhase.SignedOut && client.ConnectionId != null)
                 {
                     Phase = LobbyPhase.Idle;
                     Status = "";
@@ -343,60 +237,75 @@ namespace Haiven.Demo.BossRoom.Lobby
                 return;
             }
 
-            Unbind();
             boundClient = client;
-            if (client == null || settings == null)
+            if (client == null && p2p?.Room != null)
             {
-                Phase = LobbyPhase.SignedOut;
+                // The demo dropped its client (a lapsed credential, for one) and
+                // disposed the socket without a close the controller can see.
+                // Give it the same window a dropped socket gets.
+                clientLostAt = Time.realtimeSinceStartupAsDouble;
+                Debug.Log("[haiven-lobby] the Haiven client went away; resuming within " + HaivenP2PSession.ResumeWindowSeconds + " s");
+                Say("The Haiven connection dropped. Reconnecting...");
+                return;
+            }
+            clientLostAt = null;
+            if (client == null || !Configure())
+            {
+                if (!entered) Phase = LobbyPhase.SignedOut;
                 Changed?.Invoke();
                 return;
             }
-            api = new SessionsApi(client.Rest, settings.AppId);
-            channel = new SessionChannel(client.Session, client.ConnectionId);
-            channel.Event += OnSessionEvent;
-            channel.Lost += OnChannelLost;
-            Phase = client.ConnectionId != null ? LobbyPhase.Idle : LobbyPhase.SignedOut;
-            if (Phase == LobbyPhase.Idle) Refresh();
+            p2p!.Attach(client.Session, client.ConnectionId);
+            if (!entered)
+            {
+                Phase = client.ConnectionId != null ? LobbyPhase.Idle : LobbyPhase.SignedOut;
+                if (Phase == LobbyPhase.Idle) Refresh();
+            }
             Changed?.Invoke();
         }
 
-        // The demo replaced its client while a room is open: a dropped socket it
-        // opened again, or one going away. The room waits for the resume.
-        private void Rebind(HaivenDemoClient? client, DemoSettings? settings)
+        // One controller for the lobby's lifetime. Its REST calls go through the
+        // current client, since the demo opens a new transport with every socket.
+        private bool Configure()
         {
-            if (channel != null)
+            if (p2p != null) return true;
+            var settings = HaivenBossRoomDemo.Current?.Settings;
+            if (settings == null) return false;
+            if (!long.TryParse(settings.AppId, NumberStyles.None, CultureInfo.InvariantCulture, out var gameId))
             {
-                channel.Event -= OnSessionEvent;
-                channel.Lost -= OnChannelLost;
-                channel.Dispose();
+                Status = "HAIVEN_DEMO_APP_ID must be the game's numeric id for Haiven rooms.";
+                return false;
             }
-            channel = null;
-            boundClient = client;
-            OnChannelLost();
-            if (client == null || settings == null) return;
-            api = new SessionsApi(client.Rest, settings.AppId);
-            channel = new SessionChannel(client.Session, client.ConnectionId);
-            channel.Event += OnSessionEvent;
-            channel.Lost += OnChannelLost;
+            sessions = new HaivenSessionsClient(new CurrentRest(() => boundClient?.Rest), gameId);
+            p2p = new HaivenP2PSession(sessions, () => Time.realtimeSinceStartupAsDouble);
+            p2p.IceOptionsChanged += options =>
+            {
+                if (transport != null) transport.Connection = options;
+            };
+            p2p.MemberJoined += _ => Say("A player joined the room.");
+            p2p.MemberLeft += (userId, reason) =>
+            {
+                if (userId == Room?.HostUserId) return;
+                Say(reason == "not_on_roster" ? "A player is no longer in the room." : "A player left the room.");
+            };
+            p2p.ConnectionLost += () =>
+            {
+                Debug.Log("[haiven-lobby] game socket lost; resuming within " + HaivenP2PSession.ResumeWindowSeconds + " s");
+                Say("The Haiven connection dropped. Reconnecting...");
+            };
+            p2p.Resumed += () =>
+            {
+                Debug.Log("[haiven-lobby] resumed the participation on connection " + Room?.ConnectionId);
+                Say("Reconnected to Haiven; the room carries on.");
+            };
+            p2p.Ended += OnEnded;
+            p2p.Diagnostic += (what, error) => Debug.LogWarning("[haiven-lobby] " + what + ": " + Describe(error));
+            return true;
         }
 
-        private void Unbind()
+        private bool Ready()
         {
-            if (channel != null)
-            {
-                channel.Event -= OnSessionEvent;
-                channel.Lost -= OnChannelLost;
-                channel.Dispose();
-            }
-            channel = null;
-            api = null;
-            boundClient = null;
-        }
-
-        private bool Ready(out string connectionId)
-        {
-            connectionId = boundClient?.ConnectionId ?? "";
-            if (api == null || channel == null || connectionId.Length == 0)
+            if (p2p == null || boundClient?.ConnectionId == null)
             {
                 Status = boundClient == null
                     ? "Sign in with Haiven first (the Haiven panel, top right)."
@@ -414,80 +323,27 @@ namespace Haiven.Demo.BossRoom.Lobby
             return true;
         }
 
-        private async Task EnterAsync(SessionAdmission admission, bool hosting)
+        private void Enter(HaivenSessionAdmission admission)
         {
-            room = admission;
-            this.hosting = hosting;
-            var connection = await IceAsync();
-            Install(admission, connection);
+            entered = true;
+            hosting = admission.Hosting;
+            Install(admission);
             var started = hosting ? BossRoomConnection.StartHost("Host") : BossRoomConnection.StartClient("Guest");
             if (!started)
             {
-                await EndRoomAsync("Boss Room's connection manager was not found.");
+                _ = EndRoomAsync("Boss Room's connection manager was not found.");
                 return;
             }
             Phase = LobbyPhase.InRoom;
-            nextRoster = Time.realtimeSinceStartup + RosterInterval;
             Status = hosting
                 ? (ShareCode != null ? "Room open. Share the code below to let players in." : "Room open. Waiting for players.")
                 : "Joined. Connecting to the host…";
+            Debug.Log($"[haiven-lobby] {p2p!.IceOptions!.IceServers.Count} ICE server(s), "
+                + (p2p.IceOptions.Policy == PeerIcePolicy.Relay ? "relay-only" : "auto"));
             Changed?.Invoke();
         }
 
-        // haiven-api issues the servers for the caller's participation on this
-        // socket. A credential is checked only when an allocation is made, so a
-        // fresh one matters for the next guest, not for connections already open.
-        private async Task<PeerConnectionOptions> IceAsync()
-        {
-            var reply = await channel!.RequestAsync("p2p.ice.servers", null, RequestTimeout);
-            var options = IceOptions(reply, out refreshIceAt);
-            Debug.Log($"[haiven-lobby] {options.IceServers.Count} ICE server(s), "
-                + (options.Policy == PeerIcePolicy.Relay ? "relay-only" : "auto"));
-            return options;
-        }
-
-        /// <summary>Reads a <c>p2p.ice.servers</c> reply into connection settings and the time to fetch again.</summary>
-        internal static PeerConnectionOptions IceOptions(ServerFrame reply, out DateTimeOffset? refreshAt)
-        {
-            if (reply.Success != true || reply.Payload == null)
-                throw new InvalidOperationException(reply.Error ?? "p2p.ice.servers failed");
-            var payload = reply.Payload;
-            var servers = new List<PeerIceServer>();
-            if (payload.TryGetProperty("iceServers", out var list))
-            {
-                foreach (var server in list.EnumerateArray())
-                {
-                    var urls = server.TryGetProperty("urls", out var u)
-                        ? u.EnumerateArray().Where(url => url.Kind == HaivenJsonKind.String).Select(url => url.GetString()).ToArray()
-                        : Array.Empty<string>();
-                    if (urls.Length == 0) continue;
-                    servers.Add(new PeerIceServer(urls, SessionsApi.NullableText(server, "username"),
-                        SessionsApi.NullableText(server, "credential")));
-                }
-            }
-            var refreshAfter = SessionsApi.NullableText(payload, "refreshAfter");
-            refreshAt = refreshAfter != null && DateTimeOffset.TryParse(refreshAfter, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal, out var at) ? at : (DateTimeOffset?)null;
-            var policy = SessionsApi.Text(payload, "relayPolicy") == "relay-only" ? PeerIcePolicy.Relay : PeerIcePolicy.All;
-            return new PeerConnectionOptions(servers, policy);
-        }
-
-        private async Task RefreshIceAsync()
-        {
-            refreshIceAt = null;
-            try
-            {
-                var connection = await IceAsync();
-                if (transport != null) transport.Connection = connection;
-            }
-            catch (Exception error)
-            {
-                Debug.LogWarning("[haiven-lobby] could not refresh ICE servers: " + Describe(error));
-                refreshIceAt = DateTimeOffset.UtcNow.AddSeconds(30);
-            }
-        }
-
-        private void Install(SessionAdmission admission, PeerConnectionOptions connection)
+        private void Install(HaivenSessionAdmission admission)
         {
             var manager = NetworkManager.Singleton;
             transport = manager.GetComponent<HaivenNetworkTransport>() ?? manager.gameObject.AddComponent<HaivenNetworkTransport>();
@@ -496,14 +352,14 @@ namespace Haiven.Demo.BossRoom.Lobby
                 previousTransport = manager.NetworkConfig.NetworkTransport;
                 manager.NetworkConfig.NetworkTransport = transport;
             }
-            signaling = new SessionPeerSignaling(channel!, admission.SessionId,
-                hosting ? admission.HostUserId : "", hosting ? null : admission.HostUserId);
-            transport.Signaling = signaling;
-            transport.HostUserId = hosting ? null : admission.HostUserId;
-            transport.Connection = connection;
+            transport.Signaling = p2p!.Signaling;
+            transport.HostUserId = admission.Hosting ? null : admission.HostUserId;
+            transport.Connection = p2p.IceOptions!;
+            // The Direct IP switch may have left its own TURN settings here.
             transport.CreateTransport = options => new UnityWebRtcPeerTransport(options);
             transport.PeerConnected += OnPeerConnected;
             transport.PeerDisconnected += OnPeerDisconnected;
+            p2p.Peers = transport;
             manager.OnClientStopped += OnStopped;
         }
 
@@ -524,51 +380,47 @@ namespace Haiven.Demo.BossRoom.Lobby
                 transport.PeerDisconnected -= OnPeerDisconnected;
                 if (previousTransport == null) HaivenP2PBoot.Reconfigure(transport);
             }
+            if (p2p != null) p2p.Peers = null;
             previousTransport = null;
             transport = null;
-            signaling = null;
         }
 
-        // The host reports the open data channel; a guest that never gets here
+        // The host reports the open data channel; a guest the host never reports
         // loses its place after 60 seconds (ADR 0036 point 15).
         private void OnPeerConnected(string userId)
         {
-            if (hosting && room != null)
-                channel?.Send("session.peer.connected",
-                    new Dictionary<string, object?> { ["sessionId"] = room.SessionId, ["userId"] = userId });
+            p2p?.ReportPeerConnected(userId);
             if (!hosting) Status = "Connected to the host.";
             Changed?.Invoke();
         }
 
         private void OnPeerDisconnected(string userId) => Changed?.Invoke();
 
-        private void OnSessionEvent(string type, IHaivenJsonNode payload)
+        // The controller already left the session; stop Boss Room's game, whose
+        // stop callback closes the lobby's side.
+        private void OnEnded(HaivenP2PEndReason reason, string? code)
         {
-            if (room == null || SessionsApi.Text(payload, "sessionId") != room.SessionId) return;
-            var manager = NetworkManager.Singleton;
-            switch (type)
+            if (reason == HaivenP2PEndReason.Left) return;
+            var status = reason switch
             {
-                case "session.member.joined":
-                    Status = "A player joined the room.";
-                    break;
-                case "session.member.left":
-                    // The server ended this participation; close the peer at once
-                    // rather than wait for the connection to fail (SDK-P2P-11).
-                    var userId = SessionsApi.Text(payload, "userId");
-                    if (hosting && transport != null && manager != null && manager.IsServer)
-                    {
-                        if (transport.DropUser(userId)) Status = "A player left the room.";
-                    }
-                    else if (!hosting && manager != null && manager.IsListening && userId != room.HostUserId)
-                        Status = "A player left the room.";
-                    break;
-                case "session.closed":
-                    Status = "The host closed the room.";
-                    if (manager != null && manager.IsListening) manager.Shutdown();
-                    else _ = EndRoomAsync(Status);
-                    break;
+                HaivenP2PEndReason.Closed => hosting ? "The room is closed." : "The host closed the room.",
+                HaivenP2PEndReason.Removed => "Haiven removed you from the room (" + (code ?? "removed") + ").",
+                HaivenP2PEndReason.ResumeRefused => "Haiven ended your place in the room (" + (code ?? "refused") + ").",
+                HaivenP2PEndReason.ResumeWindowElapsed => "The Haiven connection did not come back within 30 seconds, so the room ended for you.",
+                HaivenP2PEndReason.SignedOut => "Haiven signed you out, so the room ended for you.",
+                _ => "Haiven refused the connection (" + (code ?? "refused") + "), so the room ended for you.",
+            };
+            Debug.Log("[haiven-lobby] the session ended: " + reason + (code != null ? " (" + code + ")" : ""));
+            var manager = NetworkManager.Singleton;
+            if (manager != null && manager.IsListening)
+            {
+                pendingStatus = status;
+                manager.Shutdown();
             }
-            Changed?.Invoke();
+            else
+            {
+                _ = EndRoomAsync(status);
+            }
         }
 
         private void OnStopped(bool wasHost)
@@ -580,27 +432,22 @@ namespace Haiven.Demo.BossRoom.Lobby
 
         private async Task EndRoomAsync(string status)
         {
-            var ended = room;
-            room = null;
-            refreshIceAt = null;
-            resuming = false;
-            lostAt = null;
+            if (!entered) return;
+            entered = false;
             Uninstall();
             Phase = boundClient?.ConnectionId != null ? LobbyPhase.Idle : LobbyPhase.SignedOut;
             Status = status;
             Changed?.Invoke();
-            if (ended == null || api == null) return;
-            try
+            if (p2p?.Room != null)
             {
-                await api.LeaveAsync(ended.SessionId);
-            }
-            catch (HaivenRestException error) when (error.Code == "session_not_found")
-            {
-                // Already over on the server: the host closed it, or it timed out.
-            }
-            catch (Exception error)
-            {
-                Debug.LogWarning("[haiven-lobby] leaving the room failed: " + Describe(error));
+                try
+                {
+                    await p2p.LeaveAsync();
+                }
+                catch (Exception error)
+                {
+                    Debug.LogWarning("[haiven-lobby] leaving the room failed: " + Describe(error));
+                }
             }
             Refresh();
         }
@@ -614,9 +461,17 @@ namespace Haiven.Demo.BossRoom.Lobby
 
         private void Fail(string status)
         {
-            room = null;
+            entered = false;
             Uninstall();
+            // Admitted, but the game could not start on it.
+            if (p2p?.Room != null) _ = p2p.LeaveAsync();
             Phase = boundClient?.ConnectionId != null ? LobbyPhase.Idle : LobbyPhase.SignedOut;
+            Status = status;
+            Changed?.Invoke();
+        }
+
+        private void Say(string status)
+        {
             Status = status;
             Changed?.Invoke();
         }
@@ -648,6 +503,22 @@ namespace Haiven.Demo.BossRoom.Lobby
                 "bad_request" => "the room settings were refused.",
                 _ => code ?? error.Message,
             };
+        }
+
+        /// <summary>The signed-in client's REST transport, whichever client is current.</summary>
+        private sealed class CurrentRest : IRestApiTransport
+        {
+            private readonly Func<IRestApiTransport?> current;
+
+            public CurrentRest(Func<IRestApiTransport?> current) => this.current = current;
+
+            public Task<string?> SendAsync(RestRequest request, CancellationToken cancellationToken) =>
+                Current().SendAsync(request, cancellationToken);
+
+            public Uri Url(string path) => Current().Url(path);
+
+            private IRestApiTransport Current() =>
+                current() ?? throw new InvalidOperationException("haiven: not signed in");
         }
     }
 }

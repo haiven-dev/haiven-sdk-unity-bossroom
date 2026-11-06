@@ -1,0 +1,26 @@
+{
+  "name": "Haiven.Sdk.Tests.WebRtc",
+  "rootNamespace": "Haiven.Sdk.WebRtc.Tests",
+  "references": [
+    "Haiven.Sdk.Core",
+    "Haiven.Sdk.WebRtc",
+    "Unity.WebRTC",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "WebGL"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A deleted notification identifier.</summary>
 	public sealed class NotificationDeleteV0
 	{
 		/// <summary>The stable identifier of this value.</summary>

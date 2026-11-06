@@ -25,12 +25,13 @@ namespace Haiven.Demo.BossRoom
     /// The demo's opt-in telemetry over the SDK's <see cref="AnalyticsBatcher"/>:
     /// <c>game.launch</c> once per run, <c>session.start</c> and <c>sdk.health</c>
     /// when the realtime socket opens, <c>session.end</c> plus one bounded
-    /// <c>playtime</c> delta when the signed-in session drops, and
-    /// <c>chat.message.sent</c> and <c>reward.claimed</c> from the existing send and
-    /// claim paths. <see cref="Shutdown"/> ends the run the same way when the game
-    /// quits, then gives the queue a bounded chance to send. SDK failures go to <c>POST /sdk/telemetry/errors</c> with the
-    /// message omitted. Event names are the contract's finite
-    /// <see cref="EventType"/> values, and nothing sent carries a player name, chat
+    /// <c>playtime</c> delta when the signed-in session drops. <see cref="Shutdown"/>
+    /// ends the run the same way when the game quits, then gives the queue a
+    /// bounded chance to send. SDK failures go to <c>POST /sdk/telemetry/errors</c>
+    /// with the message omitted. Chat messages and reward claims are
+    /// authoritative user-domain actions and are never duplicated into
+    /// analytics. Event names come from the contract's finite event
+    /// vocabulary, and nothing sent carries a player name, chat
     /// text, or credential. Enqueue never waits on the network and never throws
     /// into gameplay.
     /// </summary>
@@ -49,6 +50,12 @@ namespace Haiven.Demo.BossRoom
         public const string EnvironmentName = "development";
         public const string SdkName = "haiven-unity";
         public const string SdkVersion = "0.0.0";
+
+        private const string GameLaunchEvent = "game.launch";
+        private const string SessionStartEvent = "session.start";
+        private const string SessionEndEvent = "session.end";
+        private const string PlaytimeEvent = "playtime";
+        private const string SdkHealthEvent = "sdk.health";
 
         /// <summary>
         /// The longest <see cref="Shutdown"/> waits for queued events: the batcher's
@@ -164,7 +171,7 @@ namespace Haiven.Demo.BossRoom
         {
             if (launched) return;
             launched = true;
-            Enqueue(EventType.EventGameLaunch, null, utcNow());
+            Enqueue(GameLaunchEvent, null, utcNow());
         }
 
         /// <summary>The socket opened: <c>session.start</c>, once per session, then <c>sdk.health</c> ok.</summary>
@@ -174,7 +181,7 @@ namespace Haiven.Demo.BossRoom
             if (!sessionStartedAt.HasValue)
             {
                 sessionStartedAt = now;
-                Enqueue(EventType.EventSessionStart, null, now);
+                Enqueue(SessionStartEvent, null, now);
             }
             Health(true, now);
         }
@@ -192,31 +199,15 @@ namespace Haiven.Demo.BossRoom
             var started = sessionStartedAt.Value;
             sessionStartedAt = null;
             var now = utcNow();
-            Enqueue(EventType.EventSessionEnd, null, now);
+            Enqueue(SessionEndEvent, null, now);
             var seconds = PlaytimeSeconds(started, now);
             if (seconds > 0)
             {
                 Enqueue(
-                    EventType.EventPlaytime,
+                    PlaytimeEvent,
                     new Dictionary<string, object?> { ["seconds"] = seconds },
                     now);
             }
-        }
-
-        /// <summary>
-        /// The player sent a chat message. The event has no properties: the text,
-        /// channel, and sender stay out of analytics.
-        /// </summary>
-        public void ChatMessageSent() => Enqueue(EventType.EventChatMessageSent, null, utcNow());
-
-        /// <summary>A reward claim was recorded; the event carries only the public reward ref.</summary>
-        public void RewardClaimed(string rewardRef)
-        {
-            if (string.IsNullOrEmpty(rewardRef)) return;
-            Enqueue(
-                EventType.EventRewardClaimed,
-                new Dictionary<string, object?> { ["rewardRef"] = rewardRef },
-                utcNow());
         }
 
         /// <summary>The session's length in seconds, clamped to [0, <see cref="MaxPlaytimeSeconds"/>].</summary>
@@ -318,7 +309,7 @@ namespace Haiven.Demo.BossRoom
 
         private void Health(bool healthy, DateTimeOffset now) =>
             Enqueue(
-                EventType.EventSDKHealth,
+                SdkHealthEvent,
                 new Dictionary<string, object?> { ["status"] = healthy ? "ok" : "error" },
                 now);
 

@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>The payload a client sends on a chat.typing frame, reporting its own typing state.</summary>
 	public sealed class WsChatTypingRequestV0
 	{
 		/// <summary>The channel the typing state applies to.</summary>

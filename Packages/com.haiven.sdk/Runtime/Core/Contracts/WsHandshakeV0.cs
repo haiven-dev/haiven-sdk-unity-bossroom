@@ -40,6 +40,7 @@ namespace Haiven.Sdk.Contracts
 		public string Subprotocol { get; set; } = null!;
 	}
 
+	/// <summary>The negotiated contract and optional SDK identity for a WebSocket connection.</summary>
 	public sealed class WsHandshakeV0
 	{
 		/// <summary>The server-generated WebSocket connection identifier.</summary>

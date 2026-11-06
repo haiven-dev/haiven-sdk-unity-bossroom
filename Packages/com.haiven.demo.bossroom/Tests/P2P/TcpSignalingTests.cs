@@ -5,6 +5,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using Haiven.Demo.BossRoom.P2P;
+using Haiven.Sdk;
+using Haiven.Sdk.Samples.Netcode;
+using Haiven.Sdk.WebRtc;
 using NUnit.Framework;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
@@ -149,7 +153,7 @@ namespace Haiven.Demo.BossRoom.P2P.Tests
             Assert.That(guest.StartClient(), Is.True, "the guest starts and waits for signaling");
             yield return Until(() => disconnected);
             Assert.That(guest.IsConnectedClient, Is.False);
-            LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("signaling could not reach"));
+            LogAssert.Expect(LogType.Log, new System.Text.RegularExpressions.Regex("closed: host_unreachable"));
         }
 
         private NetworkManager Manager(string name, ushort port)

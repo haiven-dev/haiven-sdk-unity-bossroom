@@ -43,6 +43,7 @@ namespace Haiven.Sdk.Contracts
 		public FriendRelationshipV0PresenceStatus? Status { get; set; }
 	}
 
+	/// <summary>An accepted friendship as seen by one of its two users.</summary>
 	public sealed class FriendRelationshipV0
 	{
 		/// <summary>The stable identifier of this value.</summary>

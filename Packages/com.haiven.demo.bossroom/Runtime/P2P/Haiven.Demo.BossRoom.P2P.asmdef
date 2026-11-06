@@ -2,7 +2,9 @@
   "name": "Haiven.Demo.BossRoom.P2P",
   "rootNamespace": "Haiven.Demo.BossRoom.P2P",
   "references": [
-    "Unity.WebRTC",
+    "Haiven.Sdk.Core",
+    "Haiven.Sdk.WebRtc",
+    "Haiven.Sdk.Samples.Netcode",
     "Unity.Netcode.Runtime",
     "Unity.Networking.Transport"
   ],

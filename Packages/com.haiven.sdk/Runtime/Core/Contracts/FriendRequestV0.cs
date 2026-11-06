@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A pending friend request and the other user it involves.</summary>
 	public sealed class FriendRequestV0
 	{
 		/// <summary>The stable identifier of this value.</summary>

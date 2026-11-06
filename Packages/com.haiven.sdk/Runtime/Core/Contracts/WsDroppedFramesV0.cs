@@ -19,6 +19,7 @@ namespace Haiven.Sdk.Contracts
 		public int Count { get; set; }
 	}
 
+	/// <summary>A report of the server-originated frames discarded while a session was expired.</summary>
 	public sealed class WsDroppedFramesV0
 	{
 		/// <summary>How many frames were discarded during the expiry episode.</summary>

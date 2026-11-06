@@ -1,0 +1,27 @@
+{
+  "name": "Haiven.Sdk.WebRtc.RelayTests",
+  "rootNamespace": "Haiven.Sdk.WebRtc.RelayTests",
+  "references": [
+    "Haiven.Sdk.Core",
+    "Haiven.Sdk.WebRtc",
+    "Haiven.Sdk.Tests.WebRtc",
+    "Unity.WebRTC",
+    "UnityEngine.TestRunner",
+    "UnityEditor.TestRunner"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "WebGL"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "nunit.framework.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "UNITY_INCLUDE_TESTS"
+  ],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

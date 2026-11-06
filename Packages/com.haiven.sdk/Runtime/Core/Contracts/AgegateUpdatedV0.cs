@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A change to the signed-in player's stored age-gate status, sent to their open sockets.</summary>
 	public sealed class AgegateUpdatedV0
 	{
 		/// <summary>The stored age band: digital-minor, digital-youth or digital-adult. Absent when none is stored.</summary>

@@ -28,6 +28,7 @@ namespace Haiven.Sdk.Contracts
 		public string? AvatarFrame { get; set; }
 	}
 
+	/// <summary>A chat message visible to a gaming client.</summary>
 	public sealed class ChatMessageV0
 	{
 		/// <summary>The identifier of the user who authored the message.</summary>

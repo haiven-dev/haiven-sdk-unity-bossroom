@@ -10,6 +10,7 @@
 
 namespace Haiven.Sdk.Contracts
 {
+	/// <summary>A Google or Apple identity linked to the account from settings.</summary>
 	public sealed class AccountIdentityLinkedV0
 	{
 		/// <summary>The sign-in provider of the identity: google or apple.</summary>

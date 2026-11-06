@@ -58,6 +58,7 @@ namespace Haiven.Sdk.Contracts
 		public string? UpdatedAt { get; set; }
 	}
 
+	/// <summary>The accepted message projection and its current moderation state.</summary>
 	public sealed class ChatMessageSubmissionV0
 	{
 		/// <summary>The accepted chat message projection.</summary>
