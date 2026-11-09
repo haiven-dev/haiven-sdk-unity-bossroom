@@ -35,6 +35,7 @@ namespace Haiven.Sdk
         private volatile string? connectionId;
         private HaivenSessionCloseKind? closeKind;
         private string? closeReason;
+        private volatile bool released;
 
         /// <param name="session">The game socket's session, opened with the game credential (SDK-P2P-1).</param>
         /// <param name="connectionId">The id from <c>auth.success</c>, when the socket authenticated before this channel existed.</param>
@@ -46,18 +47,22 @@ namespace Haiven.Sdk
             session.ReplyReceived += OnReply;
             session.EventReceived += OnEvent;
             session.Closed += OnClosed;
+            session.Disposed += OnDisposed;
         }
 
         /// <summary>The server's id for this socket, from <c>auth.success</c>; null until then and after a close.</summary>
         public string? ConnectionId => connectionId;
 
-        /// <summary>Authenticated, with a known <see cref="ConnectionId"/>.</summary>
-        public bool IsOpen => session.State == HaivenSessionState.Authenticated && connectionId != null;
+        /// <summary>Authenticated, with a known <see cref="ConnectionId"/>, and not disposed by the game.</summary>
+        public bool IsOpen => !released && session.State == HaivenSessionState.Authenticated && connectionId != null;
 
         /// <summary>A server event, from <see cref="Pump"/>: its frame.</summary>
         public event Action<ServerFrame>? Event;
 
-        /// <summary>The socket closed, from <see cref="Pump"/>. <see cref="CloseKind"/> says how.</summary>
+        /// <summary>
+        /// The socket closed, or the game disposed its session, from <see cref="Pump"/>.
+        /// <see cref="CloseKind"/> says how; it stays null after a disposal, which counts as a plain drop.
+        /// </summary>
         public event Action? Lost;
 
         /// <summary>How the socket closed, classified by <see cref="HaivenSessionClose"/>; null while it is open.</summary>
@@ -71,7 +76,7 @@ namespace Haiven.Sdk
         /// <exception cref="TimeoutException">No reply within <paramref name="timeout"/>.</exception>
         public async Task<ServerFrame> RequestAsync(string type, object? payload, TimeSpan timeout)
         {
-            if (session.State == HaivenSessionState.Closed) throw new InvalidOperationException("haiven: the game socket is closed");
+            if (released || session.State == HaivenSessionState.Closed) throw new InvalidOperationException("haiven: the game socket is closed");
             var sent = session.Send(type, payload);
             var reply = Wait(sent.RequestId);
             var finished = await Task.WhenAny(reply.Task, Task.Delay(timeout)).ConfigureAwait(true);
@@ -87,7 +92,7 @@ namespace Haiven.Sdk
         /// </summary>
         public void Send(string type, object? payload, Action<ServerFrame>? onReply = null)
         {
-            if (session.State == HaivenSessionState.Closed) return;
+            if (released || session.State == HaivenSessionState.Closed) return;
             var sent = session.Send(type, payload);
             // Claimed even when nobody reads it, so its reply is not parked forever.
             var handler = onReply ?? (_ => { });
@@ -108,6 +113,7 @@ namespace Haiven.Sdk
             session.ReplyReceived -= OnReply;
             session.EventReceived -= OnEvent;
             session.Closed -= OnClosed;
+            session.Disposed -= OnDisposed;
             foreach (var pending in waiting.Values) pending.TrySetCanceled();
             waiting.Clear();
             handlers.Clear();
@@ -154,6 +160,15 @@ namespace Haiven.Sdk
             connectionId = null;
             closeReason = reason;
             closeKind = HaivenSessionClose.Classify(code, reason);
+            inbox.Enqueue(() => Lost?.Invoke());
+        }
+
+        // The session can no longer send or receive, so the socket is gone as
+        // far as the controller is concerned, without a close code (SDK-P2P-5).
+        private void OnDisposed()
+        {
+            released = true;
+            connectionId = null;
             inbox.Enqueue(() => Lost?.Invoke());
         }
     }

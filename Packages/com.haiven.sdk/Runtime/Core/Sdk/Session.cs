@@ -184,6 +184,13 @@ namespace Haiven.Sdk
         /// </summary>
         public HaivenSessionCloseKind? CloseKind { get; private set; }
 
+        /// <summary>
+        /// The game let go of this session with <see cref="Dispose"/>. Raised
+        /// once, and only when the socket had not closed first: a socket the
+        /// game disposes without closing raises no <see cref="Closed"/>.
+        /// </summary>
+        public event Action? Disposed;
+
         /// <summary>Starts the required first-frame authentication exactly once.</summary>
         public void Opened()
         {
@@ -238,6 +245,7 @@ namespace Haiven.Sdk
             disposed = true;
             socket.Received -= Receive;
             socket.Closed -= SocketClosed;
+            if (State != HaivenSessionState.Closed) Disposed?.Invoke();
         }
 
         private void Authenticate()

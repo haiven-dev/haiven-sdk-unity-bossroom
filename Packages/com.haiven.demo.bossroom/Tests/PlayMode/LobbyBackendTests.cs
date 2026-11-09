@@ -164,6 +164,48 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
         }
 
         /// <summary>
+        /// The demo disposes its client when the credential lapses, without a
+        /// close the controller could see. The controller treats the disposal as
+        /// a drop, starts the resume window, and resumes on the next socket.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator AGuestWhoseClientIsDisposedResumesOnTheNextSocket()
+        {
+            if (!Configured(out var baseUrl, out var appId, out var integration)) yield break;
+            Player? host = null, guest = null;
+            HaivenSessionAdmission? created = null, joined = null;
+            yield return Run(async () =>
+            {
+                host = await Player.SignInAsync(baseUrl, appId, integration, "lobby-disposed-host-" + Short());
+                guest = await Player.SignInAsync(baseUrl, appId, integration, "lobby-disposed-guest-" + Short());
+            });
+            disposables.Add(host!);
+            disposables.Add(guest!);
+            yield return Until(() => host!.Ready && guest!.Ready, "both game sockets authenticated", host!, guest!);
+            yield return Run(async () =>
+            {
+                created = await host.P2P.CreateAsync(new HaivenSessionCreateOptions(4));
+                joined = await guest.P2P.JoinAsync(created.SessionId);
+            });
+            var before = joined!.ConnectionId;
+            var lost = false;
+            var resumed = false;
+            guest.P2P.ConnectionLost += () => lost = true;
+            guest.P2P.Resumed += () => resumed = true;
+
+            // Disposed, not closed: no socket close reaches the controller.
+            guest.CloseSocket();
+            yield return Until(() => guest.P2P.State == HaivenP2PState.Resuming, "the guest treated the disposal as a drop", host, guest);
+            Assert.That(lost, Is.True, "ConnectionLost was raised");
+
+            yield return Run(() => guest.OpenSocketAsync());
+            yield return Until(() => resumed, "the participation resumed on the new socket", host, guest);
+            Assert.That(guest.P2P.State, Is.EqualTo(HaivenP2PState.InSession));
+            Assert.That(joined.ConnectionId, Is.Not.EqualTo(before));
+            yield return Run(() => host.P2P.LeaveAsync());
+        }
+
+        /// <summary>
         /// A guest whose socket stays gone loses the room when the window ends,
         /// and the server ends its participation too (connection_lost): the host
         /// drops it, from session.member.left or from its next roster read.
@@ -341,7 +383,7 @@ namespace Haiven.Demo.BossRoom.PlayModeTests
                 socket = null;
             }
 
-            private async Task OpenSocketAsync()
+            public async Task OpenSocketAsync()
             {
                 socket = new SystemNetSocket();
                 session = new HaivenSessionCore(socket, () => token);
