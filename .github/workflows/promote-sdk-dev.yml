@@ -8,8 +8,9 @@ name: promote sdk-dev
 # approval. The expected SHA makes each dispatch an exact, reviewable action.
 #
 # The pull request head is a disposable branch named for that sdk-dev SHA.
-# delete_branch_on_merge may delete that head. This workflow never merges and
-# never deletes or resets sdk-dev.
+# delete_branch_on_merge may delete that head. A later dispatch closes every
+# other open promote/sdk-dev-* pull request so a stale head cannot merge.
+# This workflow never merges and never deletes or resets sdk-dev.
 on:
   workflow_dispatch:
     inputs:
@@ -63,6 +64,10 @@ jobs:
             echo "sdk-dev moved: expected $EXPECTED_SDK_DEV_SHA, found $sdk_dev_sha" >&2
             exit 1
           fi
+          if ! git merge-base --is-ancestor origin/main origin/sdk-dev; then
+            echo "main is not contained in sdk-dev; reconcile sdk-dev before promoting" >&2
+            exit 1
+          fi
 
           commit_count="$(git rev-list --count origin/main..origin/sdk-dev)"
           if [[ "$commit_count" == 0 ]]; then
@@ -71,6 +76,13 @@ jobs:
           fi
 
           promotion_branch="promote/sdk-dev-${sdk_dev_sha}"
+          # Do not emit BEGIN_COMMIT_OVERRIDE / END_COMMIT_OVERRIDE. release-please
+          # preprocessCommitMessage replaces every commit associated with this
+          # pull request with that block. A merge commit and each patch are both
+          # associated, so each change would be listed once per commit. Commit
+          # messages already carry breaking-change and Release-As footers.
+          # Squash messages are COMMIT_MESSAGES, so those commits still split
+          # out of the squash body.
           {
             echo "Promotes the exact reviewed sdk-dev head into main."
             echo
@@ -81,13 +93,8 @@ jobs:
             echo
             echo "The release-please workflow runs on main after this PR merges. It opens"
             echo "the separately reviewed version/changelog PR; merging that PR publishes"
-            echo "the tag and GitHub release."
-            echo
-            echo "BEGIN_COMMIT_OVERRIDE"
-            git log --reverse \
-              --format='BEGIN_NESTED_COMMIT%n%s%nEND_NESTED_COMMIT' \
-              origin/main..origin/sdk-dev
-            echo "END_COMMIT_OVERRIDE"
+            echo "the tag and GitHub release. Release Please reads each promoted commit"
+            echo "from its own message, including breaking-change and Release-As footers."
             echo
             echo "After the release PR merges, reset sdk-dev to main with a force-with-lease"
             echo "guarded by \`$sdk_dev_sha\`, as documented in CONTRIBUTING.md."
@@ -155,6 +162,30 @@ jobs:
               -F body=@"$RUNNER_TEMP/sdk-dev-promotion.md" \
               --jq .number)"
           fi
+          if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "promotion pull request number is missing" >&2
+            exit 1
+          fi
+
+          # Close every other open promotion PR so a stale head cannot merge.
+          stale_prs="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&base=main&per_page=100" \
+            --jq '.[] | select(.head.ref | test("^promote/sdk-dev-[0-9a-f]{40}$")) | select(.base.ref == "main") | [.number, .head.ref] | @tsv')"
+          while IFS=$'\t' read -r stale_number stale_head; do
+            [[ -z "$stale_number" ]] && continue
+            if [[ "$stale_head" == "$PROMOTION_BRANCH" || "$stale_number" == "$pr_number" ]]; then
+              continue
+            fi
+            if [[ ! "$stale_number" =~ ^[0-9]+$ || ! "$stale_head" =~ ^promote/sdk-dev-[0-9a-f]{40}$ ]]; then
+              echo "refusing to close unexpected pull request: ${stale_number} ${stale_head}" >&2
+              exit 1
+            fi
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/pulls/${stale_number}" \
+              -f state=closed \
+              --silent
+            echo "closed superseded promotion PR #${stale_number} (${stale_head})"
+          done <<< "$stale_prs"
 
           echo "number=$pr_number" >> "$GITHUB_OUTPUT"
           gh pr view "$pr_number" \
