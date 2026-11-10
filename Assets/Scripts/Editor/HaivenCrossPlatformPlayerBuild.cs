@@ -13,7 +13,17 @@ public static class HaivenCrossPlatformPlayerBuild
 {
     public static void BuildAll()
     {
-        var root = Path.Combine(Directory.GetCurrentDirectory(), "Builds", "players");
+        // -projectPath does not set the process working directory. Builds/ is
+        // gitignored only at the Unity project root, the parent of Assets.
+        var projectRoot = Path.GetDirectoryName(Application.dataPath);
+        if (string.IsNullOrEmpty(projectRoot))
+        {
+            Debug.LogError("Haiven player build could not resolve the Unity project from Application.dataPath.");
+            EditorApplication.Exit(1);
+            return;
+        }
+
+        var root = Path.Combine(projectRoot, "Builds", "players");
         var targets = new[]
         {
             (BuildTarget.StandaloneLinux64, Path.Combine(root, "linux-x64", "HaivenBossRoom.x86_64")),
