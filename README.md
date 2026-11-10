@@ -270,7 +270,16 @@ For a deep dive into Unity Netcode and Boss Room, visit our [documentation site]
 <br><br>
   
 ## License
-Boss Room is licensed under the Unity Companion License. See [LICENSE.md](LICENSE.md) for more legal information.
+Unity-owned Boss Room source stays under the Unity Companion License. See [LICENSE.md](LICENSE.md) and [Packages/com.unity.multiplayer.samples.coop/LICENSE.md](Packages/com.unity.multiplayer.samples.coop/LICENSE.md). Those notices are unchanged.
+
+Haiven-owned source is SPDX `Apache-2.0`. Copyright 2026 Haiven. The Apache-2.0 terms are separate files on those paths:
+
+- [Packages/com.haiven.sdk/LICENSE](Packages/com.haiven.sdk/LICENSE)
+- [Packages/com.haiven.demo.bossroom/LICENSE](Packages/com.haiven.demo.bossroom/LICENSE)
+- [Assets/HaivenGenerated/LICENSE.txt](Assets/HaivenGenerated/LICENSE.txt)
+- [ci/LICENSE](ci/LICENSE)
+
+That grant covers only those paths. It does not replace the Unity Companion License on the rest of this repository.
 
 For a deep dive in Unity Netcode and Boss Room, visit our [docs site](https://docs-multiplayer.unity3d.com/).
 <br><br>
