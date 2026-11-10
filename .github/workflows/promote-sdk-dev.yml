@@ -76,13 +76,78 @@ jobs:
           fi
 
           promotion_branch="promote/sdk-dev-${sdk_dev_sha}"
-          # Do not emit BEGIN_COMMIT_OVERRIDE / END_COMMIT_OVERRIDE. release-please
-          # preprocessCommitMessage replaces every commit associated with this
-          # pull request with that block. A merge commit and each patch are both
-          # associated, so each change would be listed once per commit. Commit
-          # messages already carry breaking-change and Release-As footers.
-          # Squash messages are COMMIT_MESSAGES, so those commits still split
-          # out of the squash body.
+          # Do not emit BEGIN_COMMIT_OVERRIDE. release-please copies that block
+          # onto every commit in the pull request, so a merge lists each change
+          # once per commit.
+          #
+          # Publish one commit parented on main with the sdk-dev tree. Each
+          # promoted subject and footer is its own nested commit in that
+          # message. A squash prefixes the first line with "* ", which hides a
+          # conventional header from splitMessages and leaves a column-0
+          # breaking footer on the chore title. The nested marker is still
+          # present after that prefix, so the footer stays on its own change.
+          # Merge and rebase read this same message once.
+          promotion_shas="$(git rev-list --reverse origin/main..origin/sdk-dev)"
+          promotion_message="$RUNNER_TEMP/sdk-dev-promotion-commit.txt"
+          {
+            printf '%s\n\n' "Promote sdk-dev to main"
+            while IFS= read -r sha; do
+              if [[ -z "$sha" ]]; then
+                continue
+              fi
+              subject="$(git log -1 --format='%s' "$sha")"
+              body="$(git log -1 --format='%b' "$sha")"
+              footers="$(printf '%s\n' "$body" | grep -E '^(BREAKING CHANGE:|BREAKING-CHANGE:|Release-As:)' || true)"
+              if [[ "$subject" == *BEGIN_COMMIT_OVERRIDE* || "$subject" == *END_COMMIT_OVERRIDE* || "$subject" == *BEGIN_NESTED_COMMIT* || "$subject" == *END_NESTED_COMMIT* ]]; then
+                echo "refusing promoted subject that contains a release-please marker" >&2
+                exit 1
+              fi
+              if [[ "$footers" == *BEGIN_COMMIT_OVERRIDE* || "$footers" == *END_COMMIT_OVERRIDE* || "$footers" == *BEGIN_NESTED_COMMIT* || "$footers" == *END_NESTED_COMMIT* ]]; then
+                echo "refusing promoted footer that contains a release-please marker" >&2
+                exit 1
+              fi
+              printf '%s\n' "BEGIN_NESTED_COMMIT"
+              printf '%s\n' "$subject"
+              if [[ -n "$footers" ]]; then
+                printf '\n%s\n' "$footers"
+              fi
+              printf '%s\n\n' "END_NESTED_COMMIT"
+            done <<< "$promotion_shas"
+          } > "$promotion_message"
+          if grep -q 'BEGIN_COMMIT_OVERRIDE' "$promotion_message"; then
+            echo "promotion commit message must not contain a commit override" >&2
+            exit 1
+          fi
+
+          tree="$(git rev-parse "${sdk_dev_sha}^{tree}")"
+          author_name="$(git log -1 --format='%an' "$sdk_dev_sha")"
+          author_email="$(git log -1 --format='%ae' "$sdk_dev_sha")"
+          author_date="$(git log -1 --format='%aI' "$sdk_dev_sha")"
+          committer_name="$(git log -1 --format='%cn' "$sdk_dev_sha")"
+          committer_email="$(git log -1 --format='%ce' "$sdk_dev_sha")"
+          committer_date="$(git log -1 --format='%cI' "$sdk_dev_sha")"
+          promotion_sha="$(
+            GIT_AUTHOR_NAME="$author_name" \
+            GIT_AUTHOR_EMAIL="$author_email" \
+            GIT_AUTHOR_DATE="$author_date" \
+            GIT_COMMITTER_NAME="$committer_name" \
+            GIT_COMMITTER_EMAIL="$committer_email" \
+            GIT_COMMITTER_DATE="$committer_date" \
+            git commit-tree "$tree" -p "$main_sha" -F "$promotion_message"
+          )"
+          if [[ ! "$promotion_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "promotion commit is missing" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse "${promotion_sha}^{tree}")" != "$tree" ]]; then
+            echo "promotion commit tree does not match sdk-dev" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse "${promotion_sha}^")" != "$main_sha" ]]; then
+            echo "promotion commit is not parented on main" >&2
+            exit 1
+          fi
+
           {
             echo "Promotes the exact reviewed sdk-dev head into main."
             echo
@@ -90,15 +155,22 @@ jobs:
             echo "- main at dispatch: \`$main_sha\`"
             echo "- commits in promotion range: $commit_count"
             echo "- promotion head: \`$promotion_branch\` (deleted on merge; sdk-dev is not)"
+            echo "- promotion commit: \`$promotion_sha\` (parent main, tree sdk-dev)"
             echo
             echo "The release-please workflow runs on main after this PR merges. It opens"
             echo "the separately reviewed version/changelog PR; merging that PR publishes"
-            echo "the tag and GitHub release. Release Please reads each promoted commit"
-            echo "from its own message, including breaking-change and Release-As footers."
+            echo "the tag and GitHub release. This pull request is one commit. Its message"
+            echo "has one release-please commit per promoted change, including breaking-change"
+            echo "and Release-As footers, so a merge, a rebase, and a squash each list that"
+            echo "change once."
             echo
             echo "After the release PR merges, reset sdk-dev to main with a force-with-lease"
             echo "guarded by \`$sdk_dev_sha\`, as documented in CONTRIBUTING.md."
           } > "$RUNNER_TEMP/sdk-dev-promotion.md"
+          if grep -q 'BEGIN_COMMIT_OVERRIDE' "$RUNNER_TEMP/sdk-dev-promotion.md"; then
+            echo "promotion pull request body must not contain a commit override" >&2
+            exit 1
+          fi
 
           body_bytes="$(wc -c < "$RUNNER_TEMP/sdk-dev-promotion.md" | tr -d '[:space:]')"
           if (( body_bytes >= 60000 )); then
@@ -112,6 +184,7 @@ jobs:
             echo "sdk_dev_sha=$sdk_dev_sha"
             echo "commit_count=$commit_count"
             echo "promotion_branch=$promotion_branch"
+            echo "promotion_sha=$promotion_sha"
             echo "body_bytes=$body_bytes"
           } >> "$GITHUB_OUTPUT"
 
@@ -121,6 +194,7 @@ jobs:
           GH_TOKEN: ${{ steps.promotion-token.outputs.token }}
           SDK_DEV_SHA: ${{ steps.promotion.outputs.sdk_dev_sha }}
           PROMOTION_BRANCH: ${{ steps.promotion.outputs.promotion_branch }}
+          PROMOTION_SHA: ${{ steps.promotion.outputs.promotion_sha }}
         run: |
           set -euo pipefail
           if [[ ! "$PROMOTION_BRANCH" =~ ^promote/sdk-dev-[0-9a-f]{40}$ ]]; then
@@ -131,11 +205,15 @@ jobs:
             echo "promotion branch ${PROMOTION_BRANCH} is not pinned to ${SDK_DEV_SHA}" >&2
             exit 1
           fi
+          if [[ ! "$PROMOTION_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "promotion commit is missing" >&2
+            exit 1
+          fi
 
-          # Same SHA republishes this disposable ref. A different tip is left
-          # untouched: this workflow does not reset branches, including sdk-dev.
-          if ! git push origin "${SDK_DEV_SHA}:refs/heads/${PROMOTION_BRANCH}"; then
-            echo "failed to publish ${PROMOTION_BRANCH} at ${SDK_DEV_SHA}" >&2
+          # Same commit republishes this disposable ref. A different tip is
+          # left untouched: this workflow does not reset branches, including sdk-dev.
+          if ! git push origin "${PROMOTION_SHA}:refs/heads/${PROMOTION_BRANCH}"; then
+            echo "failed to publish ${PROMOTION_BRANCH} at ${PROMOTION_SHA}" >&2
             exit 1
           fi
 
@@ -199,6 +277,7 @@ jobs:
           SDK_DEV_SHA: ${{ steps.promotion.outputs.sdk_dev_sha }}
           COMMIT_COUNT: ${{ steps.promotion.outputs.commit_count }}
           PROMOTION_BRANCH: ${{ steps.promotion.outputs.promotion_branch }}
+          PROMOTION_SHA: ${{ steps.promotion.outputs.promotion_sha }}
           BODY_BYTES: ${{ steps.promotion.outputs.body_bytes }}
         run: |
           {
@@ -207,6 +286,7 @@ jobs:
             echo "- PR: #$PR_NUMBER"
             echo "- sdk-dev: \`$SDK_DEV_SHA\`"
             echo "- promotion head: \`$PROMOTION_BRANCH\`"
+            echo "- promotion commit: \`$PROMOTION_SHA\`"
             echo "- main at dispatch: \`$MAIN_SHA\`"
             echo "- commits: $COMMIT_COUNT"
             echo "- body bytes: $BODY_BYTES"
