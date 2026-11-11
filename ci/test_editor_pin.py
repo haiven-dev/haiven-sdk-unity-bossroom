@@ -1,3 +1,5 @@
+# Copyright 2026 Haiven
+# SPDX-License-Identifier: Apache-2.0
 """The published Boss Room demo stays on Boss Room v3.0.0's Unity 6.0 pin."""
 
 import json
@@ -69,6 +71,26 @@ class EditorPinTests(unittest.TestCase):
         manifest = json.loads((ROOT / "Packages/manifest.json").read_text())
         self.assertNotIn("com.unity.netcode.gameobjects", manifest.get("testables", []))
 
+    def test_haiven_paths_are_apache_and_unity_license_stays(self):
+        for rel in (
+            "Packages/com.haiven.sdk/LICENSE",
+            "Packages/com.haiven.demo.bossroom/LICENSE",
+            "Assets/HaivenGenerated/LICENSE.txt",
+            "ci/LICENSE",
+        ):
+            text = (ROOT / rel).read_text()
+            self.assertIn("Apache License", text, rel)
+            self.assertIn("Version 2.0, January 2004", text, rel)
+        for name in ("com.haiven.sdk", "com.haiven.demo.bossroom"):
+            manifest = json.loads((ROOT / "Packages" / name / "package.json").read_text())
+            self.assertEqual(manifest["license"], "Apache-2.0", name)
+        for rel in (
+            "LICENSE.md",
+            "Packages/com.unity.multiplayer.samples.coop/LICENSE.md",
+        ):
+            text = (ROOT / rel).read_text()
+            self.assertIn("Unity Companion License", text, rel)
+            self.assertNotIn("Apache License", text, rel)
 
 if __name__ == "__main__":
     unittest.main()
