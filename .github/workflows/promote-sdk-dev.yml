@@ -164,8 +164,14 @@ jobs:
             echo "and Release-As footers, so a merge, a rebase, and a squash each list that"
             echo "change once."
             echo
-            echo "After the release PR merges, reset sdk-dev to main with a force-with-lease"
-            echo "guarded by \`$sdk_dev_sha\`, as documented in CONTRIBUTING.md."
+            echo "After the release PR merges, reset sdk-dev to main from a clean clone:"
+            echo
+            echo "\`\`\`sh"
+            echo "git fetch origin main sdk-dev"
+            echo "git push --force-with-lease=refs/heads/sdk-dev:$sdk_dev_sha origin refs/remotes/origin/main:refs/heads/sdk-dev"
+            echo "\`\`\`"
+            echo
+            echo "The lease refuses the reset if sdk-dev moved after this promotion."
           } > "$RUNNER_TEMP/sdk-dev-promotion.md"
           if grep -q 'BEGIN_COMMIT_OVERRIDE' "$RUNNER_TEMP/sdk-dev-promotion.md"; then
             echo "promotion pull request body must not contain a commit override" >&2

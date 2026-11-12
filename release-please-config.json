@@ -12,7 +12,19 @@
     ".": {
       "package-name": "haiven-sdk-unity-bossroom",
       "initial-version": "0.0.1",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "Packages/com.haiven.sdk/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "Packages/com.haiven.demo.bossroom/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }
