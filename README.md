@@ -2,6 +2,7 @@
 <br><br>
 
 # Boss Room: a Co-op, Multiplayer RPG Sample
+
 ###  Made with and Including Utilities for Netcode for GameObjects
 <br>
 
@@ -11,6 +12,9 @@
 <br><br>
 
 Boss Room is a fully functional co-op multiplayer RPG made with Unity Netcode. It is an educational sample designed to showcase typical netcode [patterns](https://docs-multiplayer.unity3d.com/netcode/current/learn/bossroom/bossroom-actions/index.html) that are frequently featured in similar multiplayer games.
+<br><br>
+
+**Haiven versioning:** this demo is versioned by release-please from its own commits. Below 1.0 a Boss Room feature ships as a patch, and matching the Unity SDK's major.minor (proposed policy) takes a `Release-As:` footer. See [Haiven versioning](Documentation/haiven-versioning.md).
 <br><br>
 
 # Boss Room Sample Overview
