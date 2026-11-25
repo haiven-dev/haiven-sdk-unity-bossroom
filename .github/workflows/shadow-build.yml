@@ -28,6 +28,7 @@ jobs:
       && vars.SDK_SHADOW_DISPATCH_ACTOR_ID != '' && github.actor_id == vars.SDK_SHADOW_DISPATCH_ACTOR_ID
     runs-on: ubuntu-24.04
     outputs:
+      environment: ${{ steps.plan.outputs.environment }}
       base_sha: ${{ steps.plan.outputs.base_sha }}
       request_id: ${{ steps.plan.outputs.request_id }}
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -61,7 +62,9 @@ jobs:
     # Every Boss Room player cross-builds on Linux in its Unity build module's image.
     name: Shadow build / ${{ matrix.platform }}
     needs: request
-    environment: shadow-source
+    # shadow-source for main stages, shadow-source-pr for pull-request stages:
+    # each holds its own source key, so unmerged code never runs beside main's.
+    environment: ${{ needs.request.outputs.environment }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.request.outputs.matrix) }}
@@ -144,7 +147,7 @@ jobs:
                    "$HOME"/.config/unity3d/Unity/*.log
                  exit "$s"' || status=$?
           else
-            echo "Set UNITY_LICENSE or UNITY_SERIAL in the shadow-source environment." >&2
+            echo "Set UNITY_LICENSE or UNITY_SERIAL in this run's shadow-source or shadow-source-pr environment." >&2
             exit 1
           fi
           # Commit even a failed activation so the always-run step can still return a seat.
