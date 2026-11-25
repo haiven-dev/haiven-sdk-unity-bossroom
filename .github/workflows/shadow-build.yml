@@ -1,0 +1,224 @@
+name: Encrypted Boss Room shadow build
+run-name: Shadow build ${{ inputs.request_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Public run correlation ID
+        type: string
+        required: true
+      request:
+        description: Approved encrypted diffs, public bases, and output recipient
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  GIT_LFS_SKIP_SMUDGE: '1'
+  GIT_TERMINAL_PROMPT: '0'
+
+jobs:
+  request:
+    if: >-
+      github.repository == 'haiven-dev/haiven-sdk-unity-bossroom' && github.event_name == 'workflow_dispatch'
+      && github.ref == 'refs/heads/main' && github.ref_protected && github.run_attempt == '1'
+      && vars.SDK_SHADOW_DISPATCH_ACTOR_ID != '' && github.actor_id == vars.SDK_SHADOW_DISPATCH_ACTOR_ID
+    runs-on: ubuntu-24.04
+    outputs:
+      base_sha: ${{ steps.plan.outputs.base_sha }}
+      request_id: ${{ steps.plan.outputs.request_id }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Require a pinned shared builder
+        env:
+          BUILDER_SHA: ${{ vars.SDK_SHADOW_BUILDER_SHA }}
+        shell: bash
+        run: '[[ "$BUILDER_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: haiven-dev/haiven-sdk-cpp
+          ref: ${{ vars.SDK_SHADOW_BUILDER_SHA }}
+          path: builder
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - id: plan
+        name: Validate the request for Boss Room
+        env:
+          EXPECTED_TARGET: 'bossroom'
+          SHADOW_REQUEST: ${{ inputs.request }}
+          DISPLAY_ID: ${{ inputs.request_id }}
+        shell: bash
+        run: |
+          [[ "$DISPLAY_ID" == "$(jq -r .request_id <<< "$SHADOW_REQUEST")" ]]
+          python -I builder/.github/shadow-build/build.py plan
+
+  build:
+    # Every Boss Room player cross-builds on Linux in its Unity build module's image.
+    name: Shadow build / ${{ matrix.platform }}
+    needs: request
+    environment: shadow-source
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.request.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: haiven-dev/haiven-sdk-cpp
+          ref: ${{ vars.SDK_SHADOW_BUILDER_SHA }}
+          path: builder
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.request.outputs.base_sha }}
+          path: source
+          lfs: false
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Install pinned age
+        shell: bash
+        run: go install filippo.io/age/cmd/age@v1.3.2
+      - name: Verify and reconstruct approved source
+        env:
+          SHADOW_REQUEST: ${{ inputs.request }}
+          SDK_SHADOW_SOURCE_AGE_IDENTITY: ${{ secrets.SDK_SHADOW_SOURCE_AGE_IDENTITY }}
+        shell: bash
+        run: |
+          go_bin="$(go env GOPATH)/bin"
+          export PATH="$go_bin:$PATH"
+          python -I builder/.github/shadow-build/build.py reconstruct --source source \
+            --dotnet source --verification "$RUNNER_TEMP/shadow-source.json"
+      - name: Fetch the approved Boss Room assets already published here
+        working-directory: source
+        shell: bash
+        run: git lfs pull
+      - name: Activate a Unity licence in a container that never sees the project
+        env:
+          IMAGE: ${{ matrix.image }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+        shell: bash
+        run: |
+          [[ "$IMAGE" =~ ^unityci/editor:ubuntu-[0-9a-z.]+-[a-z0-9-]+@sha256:[0-9a-f]{64}$ ]]
+          # Activation, build and seat return each run in their own container. Only this one and
+          # the return container receive the account, always on stdin, never as docker arguments
+          # or container environment. The build container starts from the committed licence
+          # state, so build code can read the licence but never the email, password or serial.
+          # All three share one hostname and MAC address so the licence's machine binding holds.
+          identity=(--hostname haiven-unity --mac-address 02:42:ac:11:00:2a)
+          # The committed image is used only by its immutable ID, kept outside the build mount.
+          image_file="$RUNNER_TEMP/unity-licensed-image"
+          rm -f "$image_file"
+          status=0
+          if [[ -n "$UNITY_SERIAL" ]]; then
+            printf '%s\n%s\n%s\n' "$UNITY_EMAIL" "$UNITY_PASSWORD" "$UNITY_SERIAL" |
+              docker run --interactive --name haiven-unity-activate "${identity[@]}" \
+                --entrypoint sh "$IMAGE" -c \
+                'IFS= read -r email && IFS= read -r password && IFS= read -r serial || exit 1
+                 unity-editor -batchmode -nographics -quit -logFile /tmp/activate.log \
+                   -serial "$serial" -username "$email" -password "$password"; s=$?
+                 rm -f /tmp/activate.log "$HOME"/.config/unity3d/*.log "$HOME"/.config/unity3d/Unity/*.log
+                 exit "$s"' || status=$?
+          elif [[ -n "$UNITY_LICENSE" ]]; then
+            printf '%s' "$UNITY_LICENSE" |
+              docker run --interactive --name haiven-unity-activate "${identity[@]}" \
+                --entrypoint sh "$IMAGE" -c \
+                'cat > /tmp/Unity_lic.ulf || exit 1
+                 unity-editor -batchmode -nographics -quit -logFile /tmp/activate.log \
+                   -manualLicenseFile /tmp/Unity_lic.ulf; s=$?
+                 rm -f /tmp/Unity_lic.ulf /tmp/activate.log "$HOME"/.config/unity3d/*.log \
+                   "$HOME"/.config/unity3d/Unity/*.log
+                 exit "$s"' || status=$?
+          else
+            echo "Set UNITY_LICENSE or UNITY_SERIAL in the shadow-source environment." >&2
+            exit 1
+          fi
+          # Commit even a failed activation so the always-run step can still return a seat.
+          if docker container inspect haiven-unity-activate >/dev/null 2>&1; then
+            image="$(docker commit haiven-unity-activate)"
+            docker rm haiven-unity-activate >/dev/null
+            [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s\n' "$image" > "$image_file"
+          fi
+          if (( status != 0 )); then
+            echo "Unity licence activation failed." >&2
+            exit 1
+          fi
+          # Mount only the project. The builder checkout, the rest of the workspace and
+          # $RUNNER_TEMP stay out of reach of build code, which runs as root in this container.
+          docker run --detach --name haiven-unity-build "${identity[@]}" \
+            --volume "$GITHUB_WORKSPACE/source:$GITHUB_WORKSPACE/source" \
+            --entrypoint sleep "$image" infinity >/dev/null
+          launcher="$RUNNER_TEMP/unity-editor/unity"
+          mkdir -p "$(dirname "$launcher")"
+          # shellcheck disable=SC2016 # $PWD and $@ expand when the launcher runs.
+          printf '#!/bin/sh\nexec docker exec --workdir "$PWD" haiven-unity-build unity-editor "$@"\n' \
+            > "$launcher"
+          chmod +x "$launcher"
+          printf 'UNITY_EDITOR=%s\n' "$launcher" >> "$GITHUB_ENV"
+      - id: build
+        name: Build and seal results
+        env:
+          SHADOW_REQUEST: ${{ inputs.request }}
+          PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          go_bin="$(go env GOPATH)/bin"
+          export PATH="$go_bin:$PATH"
+          # -I keeps the builder's own directory and the working directory off sys.path, so
+          # nothing the build writes can be imported by the host process that seals the result.
+          python -I builder/.github/shadow-build/build.py build --platform "$PLATFORM" --source source \
+            --dotnet source --verification "$RUNNER_TEMP/shadow-source.json" \
+            --work "$RUNNER_TEMP/shadow-build" --bundle "$RUNNER_TEMP/build.age"
+      - name: Retain encrypted results
+        if: ${{ !cancelled() && steps.build.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: shadow-${{ needs.request.outputs.request_id }}-${{ matrix.platform }}
+          path: ${{ runner.temp }}/build.age
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Stop the build container and return the Unity serial
+        if: always()
+        env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        shell: bash
+        run: |
+          # Force-removing the build container kills anything build code left running in it
+          # before the account is used again. Then delete the project it could write, so no
+          # later host command, including checkout's post-job Git cleanup, runs inside it.
+          docker rm --force haiven-unity-build >/dev/null 2>&1 || true
+          sudo rm -rf source || echo "::warning::Could not remove the build checkout."
+          image_file="$RUNNER_TEMP/unity-licensed-image"
+          image="$(cat "$image_file" 2>/dev/null || true)"
+          if [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]] && docker image inspect "$image" >/dev/null 2>&1; then
+            if [[ -n "$UNITY_SERIAL" ]]; then
+              # A fresh container from the committed activation, which build code never touched.
+              printf '%s\n%s\n' "$UNITY_EMAIL" "$UNITY_PASSWORD" |
+                docker run --rm --interactive --hostname haiven-unity --mac-address 02:42:ac:11:00:2a \
+                  --entrypoint sh "$image" -c \
+                  'IFS= read -r email && IFS= read -r password || exit 1
+                   unity-editor -batchmode -nographics -quit -logFile /tmp/return.log -returnlicense \
+                     -username "$email" -password "$password"' \
+                || echo "::warning::Return the Unity serial seat by hand."
+            fi
+            docker image rm --force "$image" >/dev/null
+          fi
+          rm -f "$image_file"
